@@ -701,7 +701,8 @@ public class CachingHiveMetastore
         };
     }
 
-    public Partition createPartition(String dbName, String tableName, List<String> values, List<String> pCols, Table table, String location) throws TException
+    @Override
+    public Partition createPartition(String dbName, String tableName, List<String> values, List<String> pCols, Table table, String location)
     {
         Partition tpart = new Partition();
         tpart.setTableName(tableName);
@@ -710,7 +711,12 @@ public class CachingHiveMetastore
         StorageDescriptor sd = new StorageDescriptor();
         TMemoryBuffer buffer = new TMemoryBuffer(1024);
         TBinaryProtocol prot = new TBinaryProtocol(buffer);
-        table.getSd().write(prot);
+        try {
+            table.getSd().write(prot);
+        }
+        catch (TException e) {
+            throw new PrestoException(HiveErrorCode.HIVE_METASTORE_ERROR.toErrorCode(), e);
+        }
         sd.read(prot);
 
         tpart.setSd(sd);
@@ -719,10 +725,21 @@ public class CachingHiveMetastore
         return tpart;
     }
 
+    @Override
     public int addPartitions(List<Partition> partitions, String dbName, String tblName) throws InvalidObjectException, AlreadyExistsException, MetaException, TException
     {
         HiveMetastoreClient client = clientProvider.createMetastoreClient();
-        int ret = client.add_partitions(partitions);
+        int ret;
+        try {
+            ret = client.add_partitions(partitions);
+        }
+        catch (AlreadyExistsException | InvalidObjectException | MetaException e) {
+            throw Throwables.propagate(e);
+        }
+        catch (TException e) {
+            throw new PrestoException(HiveErrorCode.HIVE_METASTORE_ERROR.toErrorCode(), e);
+        }
+
         if (ret ==  partitions.size()) {
             invalidatePartitionCaches(dbName, tblName);
         }

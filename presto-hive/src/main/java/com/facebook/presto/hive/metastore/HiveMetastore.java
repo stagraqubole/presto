@@ -27,6 +27,10 @@ public interface HiveMetastore
 
     void dropTable(String databaseName, String tableName);
 
+    Partition createPartition(String dbName, String tableName, List<String> values, List<String> pCols, Table table, String location);
+
+    int addPartitions(List<Partition> partitions, String dbName, String tblName);
+
     @Managed
     void flushCache();
 
