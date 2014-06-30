@@ -726,7 +726,7 @@ public class CachingHiveMetastore
     }
 
     @Override
-    public int addPartitions(List<Partition> partitions, String dbName, String tblName) throws InvalidObjectException, AlreadyExistsException, MetaException, TException
+    public int addPartitions(List<Partition> partitions, String dbName, String tblName)
     {
         HiveMetastoreClient client = clientProvider.createMetastoreClient();
         int ret;

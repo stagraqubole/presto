@@ -85,13 +85,13 @@ public class InMemoryHiveMetastore
     }
 
     @Override
-    Partition createPartition(String dbName, String tableName, List<String> values, List<String> pCols, Table table, String location)
+    public Partition createPartition(String dbName, String tableName, List<String> values, List<String> pCols, Table table, String location)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    int addPartitions(List<Partition> partitions, String dbName, String tblName)
+    public int addPartitions(List<Partition> partitions, String dbName, String tblName)
     {
         throw new UnsupportedOperationException();
     }
