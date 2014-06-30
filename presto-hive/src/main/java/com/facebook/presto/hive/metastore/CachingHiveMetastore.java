@@ -499,11 +499,22 @@ public class CachingHiveMetastore
         }
     }
 
-    public boolean dropPartition(String dbName, String tableName, List<String> parts, boolean deleteData) throws NoSuchObjectException, MetaException, TException
+    public boolean dropPartition(String dbName, String tableName, List<String> parts, boolean deleteData)
     {
         HiveMetastoreClient client = clientProvider.createMetastoreClient();
 
-        boolean ret = client.drop_partition(dbName, tableName, parts, deleteData);
+        boolean ret = false;
+
+        try {
+            ret = client.drop_partition(dbName, tableName, parts, deleteData);
+        }
+        catch (NoSuchObjectException | MetaException e) {
+            throw Throwables.propagate(e);
+        }
+        catch (TException e) {
+            throw new PrestoException(HiveErrorCode.HIVE_METASTORE_ERROR.toErrorCode(), e);
+        }
+
         if (ret) {
             invalidatePartitionCaches(dbName, tableName);
         }
@@ -713,11 +724,11 @@ public class CachingHiveMetastore
         TBinaryProtocol prot = new TBinaryProtocol(buffer);
         try {
             table.getSd().write(prot);
+            sd.read(prot);
         }
         catch (TException e) {
             throw new PrestoException(HiveErrorCode.HIVE_METASTORE_ERROR.toErrorCode(), e);
         }
-        sd.read(prot);
 
         tpart.setSd(sd);
         tpart.getSd().setLocation(location);

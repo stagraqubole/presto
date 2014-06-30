@@ -97,6 +97,12 @@ public class InMemoryHiveMetastore
     }
 
     @Override
+    public boolean dropPartition(String dbName, String tableName, List<String> parts, boolean deleteData)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public List<String> getAllTables(String databaseName)
             throws NoSuchObjectException
     {

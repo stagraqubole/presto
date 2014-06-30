@@ -31,6 +31,8 @@ public interface HiveMetastore
 
     int addPartitions(List<Partition> partitions, String dbName, String tblName);
 
+    boolean dropPartition(String dbName, String tableName, List<String> parts, boolean deleteData);
+
     @Managed
     void flushCache();
 
