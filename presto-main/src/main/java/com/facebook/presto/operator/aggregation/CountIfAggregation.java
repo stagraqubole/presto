@@ -20,7 +20,7 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 
 public class CountIfAggregation
-        extends AbstractAggregationFunction<LongState>
+        extends AbstractExactAggregationFunction<LongState>
 {
     public static final CountIfAggregation COUNT_IF = new CountIfAggregation();
 
@@ -32,7 +32,7 @@ public class CountIfAggregation
     @Override
     protected void processInput(LongState state, Block block, int index)
     {
-        if (block.getBoolean(index)) {
+        if (BOOLEAN.getBoolean(block, index)) {
             state.setLong(state.getLong() + 1);
         }
     }

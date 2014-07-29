@@ -13,7 +13,7 @@
  */
 package com.facebook.presto.hive;
 
-import com.facebook.presto.spi.Connector;
+import com.facebook.presto.connector.InternalConnector;
 import com.facebook.presto.spi.ConnectorHandleResolver;
 import com.facebook.presto.spi.ConnectorIndexResolver;
 import com.facebook.presto.spi.ConnectorMetadata;
@@ -21,15 +21,16 @@ import com.facebook.presto.spi.ConnectorOutputHandleResolver;
 import com.facebook.presto.spi.ConnectorRecordSetProvider;
 import com.facebook.presto.spi.ConnectorRecordSinkProvider;
 import com.facebook.presto.spi.ConnectorSplitManager;
+import com.facebook.presto.split.ConnectorDataStreamProvider;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
 public class HiveConnector
-        implements Connector
+        implements InternalConnector
 {
     private final ConnectorMetadata metadata;
     private final ConnectorSplitManager splitManager;
-    private final ConnectorRecordSetProvider recordSetProvider;
+    private final ConnectorDataStreamProvider connectorDataStreamProvider;
     private final ConnectorRecordSinkProvider recordSinkProvider;
     private final ConnectorHandleResolver handleResolver;
     private final ConnectorOutputHandleResolver outputHandleResolver;
@@ -37,14 +38,14 @@ public class HiveConnector
     public HiveConnector(
             ConnectorMetadata metadata,
             ConnectorSplitManager splitManager,
-            ConnectorRecordSetProvider recordSetProvider,
+            ConnectorDataStreamProvider connectorDataStreamProvider,
             ConnectorRecordSinkProvider recordSinkProvider,
             ConnectorHandleResolver handleResolver,
             ConnectorOutputHandleResolver outputHandleResolver)
     {
         this.metadata = checkNotNull(metadata, "metadata is null");
         this.splitManager = checkNotNull(splitManager, "splitManager is null");
-        this.recordSetProvider = checkNotNull(recordSetProvider, "recordSetProvider is null");
+        this.connectorDataStreamProvider = checkNotNull(connectorDataStreamProvider, "connectorDataStreamProvider is null");
         this.recordSinkProvider = checkNotNull(recordSinkProvider, "recordSinkProvider is null");
         this.handleResolver = checkNotNull(handleResolver, "handleResolver is null");
         this.outputHandleResolver = checkNotNull(outputHandleResolver, "outputHandleResolver is null");
@@ -63,9 +64,15 @@ public class HiveConnector
     }
 
     @Override
+    public ConnectorDataStreamProvider getDataStreamProvider()
+    {
+        return connectorDataStreamProvider;
+    }
+
+    @Override
     public ConnectorRecordSetProvider getRecordSetProvider()
     {
-        return recordSetProvider;
+        throw new UnsupportedOperationException();
     }
 
     @Override

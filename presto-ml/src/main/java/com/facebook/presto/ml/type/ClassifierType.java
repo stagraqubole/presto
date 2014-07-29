@@ -25,7 +25,7 @@ public class ClassifierType
 {
     public static final ClassifierType CLASSIFIER = new ClassifierType();
 
-    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = new VariableWidthBlockEncoding.VariableWidthBlockEncodingFactory(CLASSIFIER);
+    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = new VariableWidthBlockEncoding.VariableWidthBlockEncodingFactory();
 
     @JsonCreator
     public ClassifierType()

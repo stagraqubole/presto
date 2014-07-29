@@ -66,7 +66,7 @@ public class TestLimitOperator
                 .build();
         input = appendSampleWeight(input, 2);
 
-        OperatorFactory operatorFactory = new LimitOperatorFactory(0, ImmutableList.of(BIGINT), 5, Optional.of(input.get(0).getChannelCount() - 1));
+        OperatorFactory operatorFactory = new LimitOperatorFactory(0, ImmutableList.of(BIGINT, BIGINT), 5, Optional.of(input.get(0).getChannelCount() - 1));
         Operator operator = operatorFactory.createOperator(driverContext);
 
         List<Page> expected = rowPagesBuilder(BIGINT, BIGINT)

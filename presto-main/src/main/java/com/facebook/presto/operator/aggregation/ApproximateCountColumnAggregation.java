@@ -17,14 +17,13 @@ import com.facebook.presto.operator.aggregation.state.AccumulatorState;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.type.Type;
-import io.airlift.slice.Slices;
 
 import static com.facebook.presto.operator.aggregation.ApproximateUtils.countError;
 import static com.facebook.presto.operator.aggregation.ApproximateUtils.formatApproximateResult;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 
 public class ApproximateCountColumnAggregation
-        extends AbstractApproximateAggregationFunction<ApproximateCountColumnAggregation.ApproximateCountState>
+        extends AbstractAggregationFunction<ApproximateCountColumnAggregation.ApproximateCountState>
 {
     public interface ApproximateCountState
             extends AccumulatorState
@@ -41,7 +40,7 @@ public class ApproximateCountColumnAggregation
     public ApproximateCountColumnAggregation(Type parameterType)
     {
         // TODO: Change intermediate to fixed width, once we have a better type system
-        super(VARCHAR, VARCHAR, parameterType);
+        super(VARCHAR, VARCHAR, parameterType, true);
     }
 
     @Override
@@ -62,6 +61,6 @@ public class ApproximateCountColumnAggregation
     protected void evaluateFinal(ApproximateCountState state, double confidence, BlockBuilder out)
     {
         String result = formatApproximateResult(state.getCount(), countError(state.getSamples(), state.getCount()), confidence, true);
-        out.appendSlice(Slices.utf8Slice(result));
+        VARCHAR.writeString(out, result);
     }
 }

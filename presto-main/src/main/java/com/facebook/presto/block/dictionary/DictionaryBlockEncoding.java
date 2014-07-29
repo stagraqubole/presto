@@ -49,7 +49,7 @@ public class DictionaryBlockEncoding
     @Override
     public Type getType()
     {
-        return dictionary.getType();
+        throw new UnsupportedOperationException();
     }
 
     @Override

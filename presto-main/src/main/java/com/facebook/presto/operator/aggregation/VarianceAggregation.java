@@ -25,7 +25,7 @@ import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 
 public class VarianceAggregation
-        extends AbstractAggregationFunction<VarianceState>
+        extends AbstractExactAggregationFunction<VarianceState>
 {
     protected final boolean population;
     protected final boolean inputIsLong;
@@ -55,10 +55,10 @@ public class VarianceAggregation
     {
         double inputValue;
         if (inputIsLong) {
-            inputValue = block.getLong(index);
+            inputValue = BIGINT.getLong(block, index);
         }
         else {
-            inputValue = block.getDouble(index);
+            inputValue = DOUBLE.getDouble(block, index);
         }
 
         updateVarianceState(state, inputValue);
@@ -78,7 +78,7 @@ public class VarianceAggregation
                 if (standardDeviation) {
                     result = Math.sqrt(result);
                 }
-                out.appendDouble(result);
+                DOUBLE.writeDouble(out, result);
             }
         }
         else {
@@ -91,7 +91,7 @@ public class VarianceAggregation
                 if (standardDeviation) {
                     result = Math.sqrt(result);
                 }
-                out.appendDouble(result);
+                DOUBLE.writeDouble(out, result);
             }
         }
     }

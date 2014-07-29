@@ -29,7 +29,7 @@ public class TestDoubleVariancePopAggregation
     {
         BlockBuilder blockBuilder = DOUBLE.createBlockBuilder(new BlockBuilderStatus());
         for (int i = start; i < start + length; i++) {
-            blockBuilder.appendDouble((double) i);
+            DOUBLE.writeDouble(blockBuilder, (double) i);
         }
         return blockBuilder.build();
     }

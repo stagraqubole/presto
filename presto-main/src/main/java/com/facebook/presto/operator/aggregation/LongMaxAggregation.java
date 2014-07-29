@@ -33,7 +33,7 @@ public class LongMaxAggregation
     public void processInput(LongMaxState state, Block block, int index)
     {
         state.setNull(false);
-        state.setLong(Math.max(state.getLong(), block.getLong(index)));
+        state.setLong(Math.max(state.getLong(), BIGINT.getLong(block, index)));
     }
 
     public interface LongMaxState

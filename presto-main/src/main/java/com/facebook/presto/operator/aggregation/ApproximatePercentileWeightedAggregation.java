@@ -13,12 +13,11 @@
  */
 package com.facebook.presto.operator.aggregation;
 
+import com.facebook.presto.operator.GroupByIdBlock;
+import com.facebook.presto.operator.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
-import com.facebook.presto.spi.block.BlockCursor;
-import com.facebook.presto.operator.GroupByIdBlock;
-import com.facebook.presto.operator.Page;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.util.array.ObjectBigArray;
 import com.google.common.base.Optional;
@@ -31,6 +30,7 @@ import io.airlift.stats.QuantileDigest;
 import java.util.List;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -72,17 +72,18 @@ public class ApproximatePercentileWeightedAggregation
     }
 
     @Override
-    public ApproximatePercentileWeightedGroupedAccumulator createGroupedAggregation(Optional<Integer> maskChannel, Optional<Integer> sampleWeightChannel, double confidence, int[] argumentChannels)
+    public ApproximatePercentileWeightedGroupedAccumulator createGroupedAggregation(Optional<Integer> maskChannel, Optional<Integer> sampleWeightChannel, double confidence, int... argumentChannels)
     {
         checkArgument(confidence == 1.0, "approximate weighted percentile does not support approximate queries");
-        return new ApproximatePercentileWeightedGroupedAccumulator(argumentChannels[0], argumentChannels[1], argumentChannels[2], parameterType, maskChannel, sampleWeightChannel);
+        checkArgument(!sampleWeightChannel.isPresent(), "Sampled data not supported");
+        return new ApproximatePercentileWeightedGroupedAccumulator(argumentChannels[0], argumentChannels[1], argumentChannels[2], parameterType, maskChannel);
     }
 
     @Override
     public GroupedAccumulator createGroupedIntermediateAggregation(double confidence)
     {
         checkArgument(confidence == 1.0, "approximate weighted percentile does not support approximate queries");
-        return new ApproximatePercentileWeightedGroupedAccumulator(-1, -1, -1, parameterType, Optional.<Integer>absent(), Optional.<Integer>absent());
+        return new ApproximatePercentileWeightedGroupedAccumulator(-1, -1, -1, parameterType, Optional.<Integer>absent());
     }
 
     public static class ApproximatePercentileWeightedGroupedAccumulator
@@ -94,10 +95,9 @@ public class ApproximatePercentileWeightedAggregation
         private final Type parameterType;
         private final ObjectBigArray<DigestAndPercentile> digests;
         private final Optional<Integer> maskChannel;
-        private final Optional<Integer> sampleWeightChannel;
         private long sizeOfValues;
 
-        public ApproximatePercentileWeightedGroupedAccumulator(int valueChannel, int weightChannel, int percentileChannel, Type parameterType, Optional<Integer> maskChannel, Optional<Integer> sampleWeightChannel)
+        public ApproximatePercentileWeightedGroupedAccumulator(int valueChannel, int weightChannel, int percentileChannel, Type parameterType, Optional<Integer> maskChannel)
         {
             this.digests = new ObjectBigArray<>();
             this.valueChannel = valueChannel;
@@ -105,7 +105,6 @@ public class ApproximatePercentileWeightedAggregation
             this.percentileChannel = percentileChannel;
             this.parameterType = parameterType;
             this.maskChannel = maskChannel;
-            this.sampleWeightChannel = sampleWeightChannel;
         }
 
         @Override
@@ -133,30 +132,19 @@ public class ApproximatePercentileWeightedAggregation
 
             digests.ensureCapacity(groupIdsBlock.getGroupCount());
 
-            BlockCursor values = page.getBlock(valueChannel).cursor();
-            BlockCursor weights = page.getBlock(weightChannel).cursor();
-            BlockCursor percentiles = page.getBlock(percentileChannel).cursor();
-            BlockCursor masks = null;
+            Block values = page.getBlock(valueChannel);
+            Block weights = page.getBlock(weightChannel);
+            Block percentiles = page.getBlock(percentileChannel);
+            Block masks = null;
             if (maskChannel.isPresent()) {
-                masks = page.getBlock(maskChannel.get()).cursor();
-            }
-            BlockCursor sampleWeights = null;
-            if (sampleWeightChannel.isPresent()) {
-                sampleWeights = page.getBlock(sampleWeightChannel.get()).cursor();
+                masks = page.getBlock(maskChannel.get());
             }
 
             for (int position = 0; position < groupIdsBlock.getPositionCount(); position++) {
-                checkState(values.advanceNextPosition());
-                checkState(weights.advanceNextPosition());
-                checkState(percentiles.advanceNextPosition());
-                checkState(masks == null || masks.advanceNextPosition());
-                checkState(sampleWeights == null || sampleWeights.advanceNextPosition());
-                long sampleWeight = SimpleAggregationFunction.computeSampleWeight(masks, sampleWeights);
-
                 long groupId = groupIdsBlock.getGroupId(position);
 
                 // skip null values
-                if (!values.isNull() && !weights.isNull() && sampleWeight > 0) {
+                if (!values.isNull(position) && !weights.isNull(position) && (masks == null || BOOLEAN.getBoolean(masks, position))) {
                     DigestAndPercentile currentValue = digests.get(groupId);
                     if (currentValue == null) {
                         currentValue = new DigestAndPercentile(new QuantileDigest(0.01));
@@ -165,33 +153,26 @@ public class ApproximatePercentileWeightedAggregation
                     }
 
                     sizeOfValues -= currentValue.getDigest().estimatedInMemorySizeInBytes();
-                    addValue(currentValue.getDigest(), values, sampleWeight * weights.getLong(), parameterType);
+                    addValue(currentValue.getDigest(), position, values, BIGINT.getLong(weights, position), parameterType);
                     sizeOfValues += currentValue.getDigest().estimatedInMemorySizeInBytes();
 
                     // use last non-null percentile
-                    if (!percentiles.isNull()) {
-                        currentValue.setPercentile(percentiles.getDouble());
+                    if (!percentiles.isNull(position)) {
+                        currentValue.setPercentile(DOUBLE.getDouble(percentiles, position));
                     }
                 }
             }
-            checkState(!values.advanceNextPosition());
-            checkState(!weights.advanceNextPosition());
-            checkState(!percentiles.advanceNextPosition());
         }
 
         @Override
-        public void addIntermediate(GroupByIdBlock groupIdsBlock, Block block)
+        public void addIntermediate(GroupByIdBlock groupIdsBlock, Block intermediates)
         {
             checkArgument(percentileChannel == -1, "Intermediate input is only allowed for a final aggregation");
 
             digests.ensureCapacity(groupIdsBlock.getGroupCount());
 
-            BlockCursor intermediates = block.cursor();
-
             for (int position = 0; position < groupIdsBlock.getPositionCount(); position++) {
-                checkState(intermediates.advanceNextPosition());
-
-                if (!intermediates.isNull()) {
+                if (!intermediates.isNull(position)) {
                     long groupId = groupIdsBlock.getGroupId(position);
 
                     DigestAndPercentile currentValue = digests.get(groupId);
@@ -201,7 +182,7 @@ public class ApproximatePercentileWeightedAggregation
                         sizeOfValues += currentValue.getDigest().estimatedInMemorySizeInBytes();
                     }
 
-                    SliceInput input = intermediates.getSlice().getInput();
+                    SliceInput input = VARCHAR.getSlice(intermediates, position).getInput();
 
                     sizeOfValues -= currentValue.getDigest().estimatedInMemorySizeInBytes();
                     currentValue.getDigest().merge(QuantileDigest.deserialize(input));
@@ -224,7 +205,7 @@ public class ApproximatePercentileWeightedAggregation
                 currentValue.getDigest().serialize(sliceOutput);
                 sliceOutput.appendDouble(currentValue.getPercentile());
 
-                output.appendSlice(sliceOutput.slice());
+                VARCHAR.writeSlice(output, sliceOutput.slice());
             }
         }
 
@@ -245,14 +226,15 @@ public class ApproximatePercentileWeightedAggregation
     public ApproximatePercentileWeightedAccumulator createAggregation(Optional<Integer> maskChannel, Optional<Integer> sampleWeightChannel, double confidence, int... argumentChannels)
     {
         checkArgument(confidence == 1.0, "approximate weighted percentile does not support approximate queries");
-        return new ApproximatePercentileWeightedAccumulator(argumentChannels[0], argumentChannels[1], argumentChannels[2], parameterType, maskChannel, sampleWeightChannel);
+        checkArgument(!sampleWeightChannel.isPresent(), "Sampled data not supported");
+        return new ApproximatePercentileWeightedAccumulator(argumentChannels[0], argumentChannels[1], argumentChannels[2], parameterType, maskChannel);
     }
 
     @Override
     public ApproximatePercentileWeightedAccumulator createIntermediateAggregation(double confidence)
     {
         checkArgument(confidence == 1.0, "approximate weighted percentile does not support approximate queries");
-        return new ApproximatePercentileWeightedAccumulator(-1, -1, -1, parameterType, Optional.<Integer>absent(), Optional.<Integer>absent());
+        return new ApproximatePercentileWeightedAccumulator(-1, -1, -1, parameterType, Optional.<Integer>absent());
     }
 
     public static class ApproximatePercentileWeightedAccumulator
@@ -263,19 +245,17 @@ public class ApproximatePercentileWeightedAggregation
         private final int percentileChannel;
         private final Type parameterType;
         private final Optional<Integer> maskChannel;
-        private final Optional<Integer> sampleWeightChannel;
 
         private final QuantileDigest digest = new QuantileDigest(0.01);
         private double percentile = -1;
 
-        public ApproximatePercentileWeightedAccumulator(int valueChannel, int weightChannel, int percentileChannel, Type parameterType, Optional<Integer> maskChannel, Optional<Integer> sampleWeightChannel)
+        public ApproximatePercentileWeightedAccumulator(int valueChannel, int weightChannel, int percentileChannel, Type parameterType, Optional<Integer> maskChannel)
         {
             this.valueChannel = valueChannel;
             this.weightChannel = weightChannel;
             this.percentileChannel = percentileChannel;
             this.parameterType = parameterType;
             this.maskChannel = maskChannel;
-            this.sampleWeightChannel = sampleWeightChannel;
         }
 
         @Override
@@ -301,48 +281,34 @@ public class ApproximatePercentileWeightedAggregation
         {
             checkArgument(valueChannel != -1, "Raw input is not allowed for a final aggregation");
 
-            BlockCursor values = page.getBlock(valueChannel).cursor();
-            BlockCursor weights = page.getBlock(weightChannel).cursor();
-            BlockCursor percentiles = page.getBlock(percentileChannel).cursor();
-            BlockCursor masks = null;
+            Block values = page.getBlock(valueChannel);
+            Block weights = page.getBlock(weightChannel);
+            Block percentiles = page.getBlock(percentileChannel);
+            Block masks = null;
             if (maskChannel.isPresent()) {
-                masks = page.getBlock(maskChannel.get()).cursor();
-            }
-            BlockCursor sampleWeights = null;
-            if (sampleWeightChannel.isPresent()) {
-                sampleWeights = page.getBlock(sampleWeightChannel.get()).cursor();
+                masks = page.getBlock(maskChannel.get());
             }
 
             for (int position = 0; position < page.getPositionCount(); position++) {
-                checkState(values.advanceNextPosition());
-                checkState(weights.advanceNextPosition());
-                checkState(percentiles.advanceNextPosition());
-                checkState(masks == null || masks.advanceNextPosition());
-                checkState(sampleWeights == null || sampleWeights.advanceNextPosition());
-                long sampleWeight = SimpleAggregationFunction.computeSampleWeight(masks, sampleWeights);
-
-                if (!values.isNull() && !weights.isNull() && sampleWeight > 0) {
-                    addValue(digest, values, sampleWeight * weights.getLong(), parameterType);
+                if (!values.isNull(position) && !weights.isNull(position) && (masks == null || BOOLEAN.getBoolean(masks, position))) {
+                    addValue(digest, position, values, BIGINT.getLong(weights, position), parameterType);
 
                     // use last non-null percentile
-                    if (!percentiles.isNull()) {
-                        percentile = percentiles.getDouble();
+                    if (!percentiles.isNull(position)) {
+                        percentile = DOUBLE.getDouble(percentiles, position);
                     }
                 }
             }
         }
 
         @Override
-        public void addIntermediate(Block block)
+        public void addIntermediate(Block intermediates)
         {
             checkArgument(valueChannel == -1, "Intermediate input is only allowed for a final aggregation");
 
-            BlockCursor intermediates = block.cursor();
-
-            for (int position = 0; position < block.getPositionCount(); position++) {
-                checkState(intermediates.advanceNextPosition());
-                if (!intermediates.isNull()) {
-                    SliceInput input = intermediates.getSlice().getInput();
+            for (int position = 0; position < intermediates.getPositionCount(); position++) {
+                if (!intermediates.isNull(position)) {
+                    SliceInput input = VARCHAR.getSlice(intermediates, position).getInput();
                     // read digest
                     digest.merge(QuantileDigest.deserialize(input));
                     // read percentile
@@ -367,7 +333,7 @@ public class ApproximatePercentileWeightedAggregation
                 sliceOutput.appendDouble(percentile);
 
                 Slice slice = sliceOutput.slice();
-                out.appendSlice(slice);
+                VARCHAR.writeSlice(out, slice);
             }
 
             return out.build();
@@ -397,14 +363,14 @@ public class ApproximatePercentileWeightedAggregation
         }
     }
 
-    private static void addValue(QuantileDigest digest, BlockCursor values, long weight, Type parameterType)
+    private static void addValue(QuantileDigest digest, int position, Block values, long weight, Type parameterType)
     {
         long value;
         if (parameterType == BIGINT) {
-            value = values.getLong();
+            value = BIGINT.getLong(values, position);
         }
         else if (parameterType == DOUBLE) {
-            value = doubleToSortableLong(values.getDouble());
+            value = doubleToSortableLong(DOUBLE.getDouble(values, position));
         }
         else {
             throw new IllegalArgumentException("Expected parameter type to be BIGINT or DOUBLE");
@@ -424,10 +390,10 @@ public class ApproximatePercentileWeightedAggregation
             long value = digest.getQuantile(percentile);
 
             if (parameterType == BIGINT) {
-                out.appendLong(value);
+                BIGINT.writeLong(out, value);
             }
             else if (parameterType == DOUBLE) {
-                out.appendDouble(longToDouble(value));
+                DOUBLE.writeDouble(out, longToDouble(value));
             }
             else {
                 throw new IllegalArgumentException("Expected parameter type to be BIGINT or DOUBLE");

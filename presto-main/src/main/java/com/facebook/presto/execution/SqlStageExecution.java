@@ -23,6 +23,7 @@ import com.facebook.presto.metadata.Split;
 import com.facebook.presto.operator.TaskStats;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Node;
+import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.split.RemoteSplit;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.facebook.presto.sql.planner.PlanFragment.OutputPartitioning;
@@ -74,6 +75,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static com.facebook.presto.OutputBuffers.INITIAL_EMPTY_OUTPUT_BUFFERS;
 import static com.facebook.presto.execution.StageInfo.stageStateGetter;
 import static com.facebook.presto.execution.TaskInfo.taskStateGetter;
+import static com.facebook.presto.spi.StandardErrorCode.NO_NODES_AVAILABLE;
+import static com.facebook.presto.util.Failures.checkCondition;
 import static com.facebook.presto.util.Failures.toFailures;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -402,10 +405,11 @@ public class SqlStageExecution
         else if (fragment.getOutputPartitioning() == OutputPartitioning.HASH) {
             checkArgument(noMoreParentNodes, "Hash partitioned output requires all parent nodes be added in a single call");
 
+            List<Type> types = fragment.getTypes();
             ImmutableMap.Builder<String, PagePartitionFunction> buffers = ImmutableMap.builder();
             for (int nodeIndex = 0; nodeIndex < parentNodes.size(); nodeIndex++) {
                 Node node = parentNodes.get(nodeIndex);
-                buffers.put(node.getNodeIdentifier(), new HashPagePartitionFunction(nodeIndex, parentNodes.size(), fragment.getPartitioningChannels()));
+                buffers.put(node.getNodeIdentifier(), new HashPagePartitionFunction(nodeIndex, parentNodes.size(), fragment.getPartitioningChannels(), types));
             }
 
             newOutputBuffers = startingOutputBuffers
@@ -588,6 +592,7 @@ public class SqlStageExecution
     {
         // create tasks on "nodeCount" random nodes
         List<Node> nodes = nodeSelector.selectRandomNodes(nodeCount);
+        checkCondition(!nodes.isEmpty(), NO_NODES_AVAILABLE, "No worker nodes available");
         for (int taskId = 0; taskId < nodes.size(); taskId++) {
             Node node = nodes.get(taskId);
             scheduleTask(taskId, node);

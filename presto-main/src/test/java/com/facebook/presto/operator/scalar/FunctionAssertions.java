@@ -38,7 +38,6 @@ import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.InMemoryRecordSet;
 import com.facebook.presto.spi.RecordSet;
 import com.facebook.presto.spi.block.Block;
-import com.facebook.presto.spi.block.BlockCursor;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.split.DataStreamProvider;
 import com.facebook.presto.sql.analyzer.ExpressionAnalysis;
@@ -54,7 +53,6 @@ import com.facebook.presto.sql.tree.DefaultTraversalVisitor;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.ExpressionRewriter;
 import com.facebook.presto.sql.tree.ExpressionTreeRewriter;
-import com.facebook.presto.sql.tree.Input;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.testing.LocalQueryRunner;
 import com.facebook.presto.testing.MaterializedResult;
@@ -106,6 +104,8 @@ public final class FunctionAssertions
 
     private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(daemonThreadsNamed("test-%s"));
 
+    private static final SqlParser SQL_PARSER = new SqlParser();
+
     private static final Page SOURCE_PAGE = new Page(
             createLongsBlock(1234L),
             createStringsBlock("hello"),
@@ -117,24 +117,24 @@ public final class FunctionAssertions
 
     private static final Page ZERO_CHANNEL_PAGE = new Page(1);
 
-    private static final Map<Input, Type> INPUT_TYPES = ImmutableMap.<Input, Type>builder()
-            .put(new Input(0), BIGINT)
-            .put(new Input(1), VARCHAR)
-            .put(new Input(2), DOUBLE)
-            .put(new Input(3), BOOLEAN)
-            .put(new Input(4), BIGINT)
-            .put(new Input(5), VARCHAR)
-            .put(new Input(6), VARCHAR)
+    private static final Map<Integer, Type> INPUT_TYPES = ImmutableMap.<Integer, Type>builder()
+            .put(0, BIGINT)
+            .put(1, VARCHAR)
+            .put(2, DOUBLE)
+            .put(3, BOOLEAN)
+            .put(4, BIGINT)
+            .put(5, VARCHAR)
+            .put(6, VARCHAR)
             .build();
 
-    private static final Map<Symbol, Input> INPUT_MAPPING = ImmutableMap.<Symbol, Input>builder()
-            .put(new Symbol("bound_long"), new Input(0))
-            .put(new Symbol("bound_string"), new Input(1))
-            .put(new Symbol("bound_double"), new Input(2))
-            .put(new Symbol("bound_boolean"), new Input(3))
-            .put(new Symbol("bound_timestamp"), new Input(4))
-            .put(new Symbol("bound_pattern"), new Input(5))
-            .put(new Symbol("bound_null_string"), new Input(6))
+    private static final Map<Symbol, Integer> INPUT_MAPPING = ImmutableMap.<Symbol, Integer>builder()
+            .put(new Symbol("bound_long"), 0)
+            .put(new Symbol("bound_string"), 1)
+            .put(new Symbol("bound_double"), 2)
+            .put(new Symbol("bound_boolean"), 3)
+            .put(new Symbol("bound_timestamp"), 4)
+            .put(new Symbol("bound_pattern"), 5)
+            .put(new Symbol("bound_null_string"), 6)
             .build();
 
     private static final Map<Symbol, Type> SYMBOL_TYPES = ImmutableMap.<Symbol, Type>builder()
@@ -283,18 +283,12 @@ public final class FunctionAssertions
         assertNotNull(output);
         assertEquals(output.getPositionCount(), 1);
         assertEquals(output.getChannelCount(), 1);
+        Type type = operator.getTypes().get(0);
 
         Block block = output.getBlock(0);
         assertEquals(block.getPositionCount(), 1);
 
-        BlockCursor cursor = block.cursor();
-        assertTrue(cursor.advanceNextPosition());
-        if (cursor.isNull()) {
-            return null;
-        }
-        else {
-            return cursor.getObjectValue(session);
-        }
+        return type.getObjectValue(session, block, 0);
     }
 
     public void assertFilter(String filter, boolean expected, boolean withNoInputColumns)
@@ -361,9 +355,9 @@ public final class FunctionAssertions
 
     public static Expression createExpression(String expression, Metadata metadata, Map<Symbol, Type> symbolTypes)
     {
-        Expression parsedExpression = SqlParser.createExpression(expression);
+        Expression parsedExpression = SQL_PARSER.createExpression(expression);
 
-        final ExpressionAnalysis analysis = analyzeExpressionsWithSymbols(SESSION, metadata, symbolTypes, ImmutableList.of(parsedExpression));
+        final ExpressionAnalysis analysis = analyzeExpressionsWithSymbols(SESSION, metadata, SQL_PARSER, symbolTypes, ImmutableList.of(parsedExpression));
         Expression rewrittenExpression = ExpressionTreeRewriter.rewriteWith(new ExpressionRewriter<Void>()
         {
             @Override
@@ -411,9 +405,7 @@ public final class FunctionAssertions
             assertEquals(page.getPositionCount(), 1);
             assertEquals(page.getChannelCount(), 1);
 
-            BlockCursor cursor = page.getBlock(0).cursor();
-            assertTrue(cursor.advanceNextPosition());
-            assertTrue(cursor.getBoolean());
+            assertTrue(page.getBoolean(operator.getTypes().get(0), 0, 0));
             value = true;
         }
         else {
@@ -460,6 +452,7 @@ public final class FunctionAssertions
                 SYMBOL_TYPES,
                 INPUT_MAPPING,
                 metadata,
+                SQL_PARSER,
                 session
         );
 
@@ -468,6 +461,7 @@ public final class FunctionAssertions
                 SYMBOL_TYPES,
                 INPUT_MAPPING,
                 metadata,
+                SQL_PARSER,
                 session
         );
 
@@ -477,9 +471,9 @@ public final class FunctionAssertions
 
     private OperatorFactory compileFilterWithNoInputColumns(Expression filter)
     {
-        filter = ExpressionTreeRewriter.rewriteWith(new SymbolToInputRewriter(ImmutableMap.<Symbol, Input>of()), filter);
+        filter = ExpressionTreeRewriter.rewriteWith(new SymbolToInputRewriter(ImmutableMap.<Symbol, Integer>of()), filter);
 
-        IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(SESSION, metadata, INPUT_TYPES, ImmutableList.of(filter));
+        IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(SESSION, metadata, SQL_PARSER, INPUT_TYPES, ImmutableList.of(filter));
 
         try {
             return compiler.compileFilterAndProjectOperator(0, filter, ImmutableList.<Expression>of(), expressionTypes, session.getTimeZoneKey());
@@ -497,7 +491,7 @@ public final class FunctionAssertions
         filter = ExpressionTreeRewriter.rewriteWith(new SymbolToInputRewriter(INPUT_MAPPING), filter);
         projection = ExpressionTreeRewriter.rewriteWith(new SymbolToInputRewriter(INPUT_MAPPING), projection);
 
-        IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(SESSION, metadata, INPUT_TYPES, ImmutableList.of(filter, projection));
+        IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(SESSION, metadata, SQL_PARSER, INPUT_TYPES, ImmutableList.of(filter, projection));
 
         try {
             return compiler.compileFilterAndProjectOperator(0, filter, ImmutableList.of(projection), expressionTypes, session.getTimeZoneKey());
@@ -515,7 +509,7 @@ public final class FunctionAssertions
         filter = ExpressionTreeRewriter.rewriteWith(new SymbolToInputRewriter(INPUT_MAPPING), filter);
         projection = ExpressionTreeRewriter.rewriteWith(new SymbolToInputRewriter(INPUT_MAPPING), projection);
 
-        IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(SESSION, metadata, INPUT_TYPES, ImmutableList.of(filter, projection));
+        IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(SESSION, metadata, SQL_PARSER, INPUT_TYPES, ImmutableList.of(filter, projection));
 
         try {
             return compiler.compileScanFilterAndProjectOperator(
@@ -592,7 +586,7 @@ public final class FunctionAssertions
                 return new RecordProjectOperator(operatorContext, records);
             }
             else {
-                return new ValuesOperator(operatorContext, ImmutableList.of(SOURCE_PAGE));
+                return new ValuesOperator(operatorContext, ImmutableList.copyOf(INPUT_TYPES.values()), ImmutableList.of(SOURCE_PAGE));
             }
         }
     }

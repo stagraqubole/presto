@@ -15,26 +15,19 @@ package com.facebook.presto.type;
 
 import com.facebook.presto.operator.scalar.ColorFunctions;
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
-import com.facebook.presto.spi.block.BlockCursor;
-import com.facebook.presto.spi.block.BlockEncodingFactory;
-import com.facebook.presto.spi.block.FixedWidthBlockUtil;
+import com.facebook.presto.spi.block.FixedWidthBlockBuilder;
 import com.facebook.presto.spi.type.FixedWidthType;
-import com.google.common.base.Preconditions;
 import io.airlift.slice.Slice;
-import io.airlift.slice.SliceOutput;
 
-import static com.facebook.presto.spi.block.FixedWidthBlockUtil.createIsolatedFixedWidthBlockBuilderFactory;
 import static io.airlift.slice.SizeOf.SIZE_OF_INT;
 
 public class ColorType
         implements FixedWidthType
 {
     public static final ColorType COLOR = new ColorType();
-
-    private static final FixedWidthBlockUtil.FixedWidthBlockBuilderFactory BLOCK_BUILDER_FACTORY = createIsolatedFixedWidthBlockBuilderFactory(COLOR);
-    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = BLOCK_BUILDER_FACTORY.getBlockEncodingFactory();
 
     public static ColorType getInstance()
     {
@@ -52,6 +45,18 @@ public class ColorType
     }
 
     @Override
+    public boolean isComparable()
+    {
+        return true;
+    }
+
+    @Override
+    public boolean isOrderable()
+    {
+        return false;
+    }
+
+    @Override
     public Class<?> getJavaType()
     {
         return long.class;
@@ -64,9 +69,13 @@ public class ColorType
     }
 
     @Override
-    public Object getObjectValue(ConnectorSession session, Slice slice, int offset)
+    public Object getObjectValue(ConnectorSession session, Block block, int position)
     {
-        int color = slice.getInt(offset);
+        if (block.isNull(position)) {
+            return null;
+        }
+
+        int color = block.getInt(position, 0);
         if (color < 0) {
             return ColorFunctions.SystemColor.valueOf(-(color + 1)).getName();
         }
@@ -80,98 +89,98 @@ public class ColorType
     @Override
     public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus)
     {
-        return BLOCK_BUILDER_FACTORY.createFixedWidthBlockBuilder(blockBuilderStatus);
+        return new FixedWidthBlockBuilder(getFixedSize(), blockBuilderStatus);
     }
 
     @Override
     public BlockBuilder createFixedSizeBlockBuilder(int positionCount)
     {
-        return BLOCK_BUILDER_FACTORY.createFixedWidthBlockBuilder(positionCount);
+        return new FixedWidthBlockBuilder(getFixedSize(), positionCount);
     }
 
     @Override
-    public boolean getBoolean(Slice slice, int offset)
+    public boolean equalTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
-        throw new UnsupportedOperationException();
+        int leftValue = leftBlock.getInt(leftPosition, 0);
+        int rightValue = rightBlock.getInt(rightPosition, 0);
+        return leftValue == rightValue;
     }
 
     @Override
-    public void writeBoolean(SliceOutput sliceOutput, boolean value)
+    public int hash(Block block, int position)
     {
-        throw new UnsupportedOperationException();
+        return block.getInt(position, 0);
     }
 
     @Override
-    public long getLong(Slice slice, int offset)
-    {
-        return slice.getInt(offset);
-    }
-
-    @Override
-    public void writeLong(SliceOutput sliceOutput, long value)
-    {
-        sliceOutput.writeInt((int) value);
-    }
-
-    @Override
-    public double getDouble(Slice slice, int offset)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void writeDouble(SliceOutput sliceOutput, double value)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Slice getSlice(Slice slice, int offset)
-    {
-        return slice.slice(offset, getFixedSize());
-    }
-
-    @Override
-    public void writeSlice(SliceOutput sliceOutput, Slice value, int offset)
-    {
-        Preconditions.checkArgument(value.length() == SIZE_OF_INT);
-        sliceOutput.writeBytes(value, offset, SIZE_OF_INT);
-    }
-
-    @Override
-    public boolean equalTo(Slice leftSlice, int leftOffset, Slice rightSlice, int rightOffset)
-    {
-        return leftSlice.getInt(leftOffset) == rightSlice.getInt(rightOffset);
-    }
-
-    @Override
-    public boolean equalTo(Slice leftSlice, int leftOffset, BlockCursor rightCursor)
-    {
-        return leftSlice.getInt(leftOffset) == (int) rightCursor.getLong();
-    }
-
-    @Override
-    public int hash(Slice slice, int offset)
-    {
-        return slice.getInt(offset);
-    }
-
-    @Override
-    public int compareTo(Slice leftSlice, int leftOffset, Slice rightSlice, int rightOffset)
+    public int compareTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
         throw new UnsupportedOperationException("Color is not ordered");
     }
 
     @Override
-    public void appendTo(Slice slice, int offset, BlockBuilder blockBuilder)
+    public void appendTo(Block block, int position, BlockBuilder blockBuilder)
     {
-        blockBuilder.appendLong(slice.getInt(offset));
+        if (block.isNull(position)) {
+            blockBuilder.appendNull();
+        }
+        else {
+            blockBuilder.writeInt(block.getInt(position, 0)).closeEntry();
+        }
     }
 
     @Override
-    public void appendTo(Slice slice, int offset, SliceOutput sliceOutput)
+    public boolean getBoolean(Block block, int position)
     {
-        sliceOutput.writeBytes(slice, offset, (int) SIZE_OF_INT);
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void writeBoolean(BlockBuilder blockBuilder, boolean value)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long getLong(Block block, int position)
+    {
+        return block.getInt(position, 0);
+    }
+
+    @Override
+    public void writeLong(BlockBuilder blockBuilder, long value)
+    {
+        blockBuilder.writeInt((int) value).closeEntry();
+    }
+
+    @Override
+    public double getDouble(Block block, int position)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void writeDouble(BlockBuilder blockBuilder, double value)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Slice getSlice(Block block, int position)
+    {
+        return block.getSlice(position, 0, getFixedSize());
+    }
+
+    @Override
+    public void writeSlice(BlockBuilder blockBuilder, Slice value)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void writeSlice(BlockBuilder blockBuilder, Slice value, int offset, int length)
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

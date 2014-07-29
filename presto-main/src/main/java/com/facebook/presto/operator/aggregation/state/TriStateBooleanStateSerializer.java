@@ -19,6 +19,7 @@ import com.facebook.presto.spi.block.BlockBuilder;
 import static com.facebook.presto.operator.aggregation.state.TriStateBooleanState.FALSE_VALUE;
 import static com.facebook.presto.operator.aggregation.state.TriStateBooleanState.NULL_VALUE;
 import static com.facebook.presto.operator.aggregation.state.TriStateBooleanState.TRUE_VALUE;
+import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 
 public class TriStateBooleanStateSerializer
         implements AccumulatorStateSerializer<TriStateBooleanState>
@@ -30,7 +31,7 @@ public class TriStateBooleanStateSerializer
             out.appendNull();
         }
         else {
-            out.appendBoolean(state.getByte() == TRUE_VALUE);
+            out.writeByte(state.getByte() == TRUE_VALUE ? 1 : 0).closeEntry();
         }
     }
 
@@ -41,7 +42,7 @@ public class TriStateBooleanStateSerializer
             state.setByte(NULL_VALUE);
         }
         else {
-            state.setByte(block.getBoolean(index) ? TRUE_VALUE : FALSE_VALUE);
+            state.setByte(BOOLEAN.getBoolean(block, index) ? TRUE_VALUE : FALSE_VALUE);
         }
     }
 }

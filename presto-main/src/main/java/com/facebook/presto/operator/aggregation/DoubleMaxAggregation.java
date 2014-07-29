@@ -33,7 +33,7 @@ public class DoubleMaxAggregation
     public void processInput(DoubleMaxState state, Block block, int index)
     {
         state.setNull(false);
-        state.setDouble(Math.max(state.getDouble(), block.getDouble(index)));
+        state.setDouble(Math.max(state.getDouble(), DOUBLE.getDouble(block, index)));
     }
 
     public interface DoubleMaxState

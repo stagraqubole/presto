@@ -143,11 +143,7 @@ public class StateCompiler
                 type(AccumulatorStateSerializer.class));
 
         // Generate constructor
-        definition.declareConstructor(new CompilerContext(null), a(PUBLIC))
-                .getBody()
-                .pushThis()
-                .invokeConstructor(Object.class)
-                .ret();
+        definition.declareDefaultConstructor(a(PUBLIC));
 
         List<StateField> fields = enumerateFields(clazz);
         generateSerialize(definition, clazz, fields);
@@ -189,10 +185,14 @@ public class StateCompiler
         }
         else {
             LocalVariableDefinition slice = compilerContext.declareVariable(Slice.class, "slice");
-            deserializerBody.comment("Slice slice = block.getSlice(index);")
+            deserializerBody.comment("Slice slice = block.getSlice(index, 0, block.getLength(index));")
                     .getVariable("block")
                     .getVariable("index")
-                    .invokeInterface(com.facebook.presto.spi.block.Block.class, "getSlice", Slice.class, int.class)
+                    .push(0)
+                    .getVariable("block")
+                    .getVariable("index")
+                    .invokeInterface(com.facebook.presto.spi.block.Block.class, "getLength", int.class, int.class)
+                    .invokeInterface(com.facebook.presto.spi.block.Block.class, "getSlice", Slice.class, int.class, int.class, int.class)
                     .putVariable(slice);
 
             for (StateField field : fields) {
@@ -224,7 +224,11 @@ public class StateCompiler
             serializerBody.comment("out.appendSlice(slice);")
                     .getVariable("out")
                     .getVariable(slice)
-                    .invokeInterface(BlockBuilder.class, "appendSlice", BlockBuilder.class, Slice.class);
+                    .push(0)
+                    .push(size)
+                    .invokeInterface(BlockBuilder.class, "writeBytes", BlockBuilder.class, Slice.class, int.class, int.class)
+                    .invokeInterface(BlockBuilder.class, "closeEntry", BlockBuilder.class)
+                    .pop();
         }
         serializerBody.ret();
     }
@@ -344,11 +348,7 @@ public class StateCompiler
                 type(AccumulatorStateFactory.class));
 
         // Generate constructor
-        definition.declareConstructor(new CompilerContext(null), a(PUBLIC))
-                .getBody()
-                .pushThis()
-                .invokeConstructor(Object.class)
-                .ret();
+        definition.declareDefaultConstructor(a(PUBLIC));
 
         // Generate single state creation method
         definition.declareMethod(new CompilerContext(null), a(PUBLIC), "createSingleState", type(Object.class))

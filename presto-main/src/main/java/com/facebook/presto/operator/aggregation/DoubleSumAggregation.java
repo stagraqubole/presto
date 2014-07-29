@@ -32,6 +32,6 @@ public class DoubleSumAggregation
     public void processInput(NullableDoubleState state, Block block, int index)
     {
         state.setNull(false);
-        state.setDouble(state.getDouble() + block.getDouble(index));
+        state.setDouble(state.getDouble() + DOUBLE.getDouble(block, index));
     }
 }

@@ -33,7 +33,7 @@ public class DoubleMinAggregation
     public void processInput(DoubleMinState state, Block block, int index)
     {
         state.setNull(false);
-        state.setDouble(Math.min(state.getDouble(), block.getDouble(index)));
+        state.setDouble(Math.min(state.getDouble(), DOUBLE.getDouble(block, index)));
     }
 
     public interface DoubleMinState

@@ -13,10 +13,10 @@
  */
 package com.facebook.presto.testing;
 
+import com.facebook.presto.operator.Operator;
 import com.facebook.presto.operator.Page;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.block.Block;
-import com.facebook.presto.spi.block.BlockCursor;
 import com.facebook.presto.spi.type.SqlDate;
 import com.facebook.presto.spi.type.SqlTime;
 import com.facebook.presto.spi.type.SqlTimeWithTimeZone;
@@ -24,19 +24,23 @@ import com.facebook.presto.spi.type.SqlTimestamp;
 import com.facebook.presto.spi.type.SqlTimestampWithTimeZone;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.base.Objects;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 
 import java.sql.Date;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
 
 public class MaterializedResult
+        implements Iterable<MaterializedRow>
 {
     public static final int DEFAULT_PRECISION = 5;
 
@@ -47,6 +51,17 @@ public class MaterializedResult
     {
         this.rows = ImmutableList.copyOf(checkNotNull(rows, "rows is null"));
         this.types = ImmutableList.copyOf(checkNotNull(types, "types is null"));
+    }
+
+    public int getRowCount()
+    {
+        return rows.size();
+    }
+
+    @Override
+    public Iterator<MaterializedRow> iterator()
+    {
+        return rows.iterator();
     }
 
     public List<MaterializedRow> getMaterializedRows()
@@ -126,12 +141,38 @@ public class MaterializedResult
         return new MaterializedRow(prestoRow.getPrecision(), jdbcValues);
     }
 
+    public static MaterializedResult materializeSourceDataStream(ConnectorSession session, Operator operator)
+    {
+        MaterializedResult.Builder builder = resultBuilder(session, operator.getTypes());
+        while (!operator.isFinished()) {
+            checkArgument(!operator.needsInput(), "Source data stream should never require input");
+
+            try {
+                operator.isBlocked().get();
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw Throwables.propagate(e);
+            }
+            catch (ExecutionException e) {
+                throw Throwables.propagate(e);
+            }
+
+            Page outputPage = operator.getOutput();
+            if (outputPage == null) {
+                break;
+            }
+            builder.page(outputPage);
+        }
+        return builder.build();
+    }
+
     public static Builder resultBuilder(ConnectorSession session, Type... types)
     {
         return resultBuilder(session, ImmutableList.copyOf(types));
     }
 
-    public static Builder resultBuilder(ConnectorSession session, List<Type> types)
+    public static Builder resultBuilder(ConnectorSession session, Iterable<? extends Type> types)
     {
         return new Builder(session, ImmutableList.copyOf(types));
     }
@@ -168,26 +209,18 @@ public class MaterializedResult
             checkNotNull(page, "page is null");
             checkArgument(page.getChannelCount() == types.size(), "Expected a page with %s columns, but got %s columns", page.getChannelCount(), types.size());
 
-            List<BlockCursor> cursors = new ArrayList<>();
-            for (Block block : page.getBlocks()) {
-                cursors.add(block.cursor());
-            }
+            for (int position = 0; position < page.getPositionCount(); position++) {
+                List<Object> values = new ArrayList<>(page.getChannelCount());
+                for (int channel = 0; channel < page.getChannelCount(); channel++) {
+                    Type type = types.get(channel);
+                    Block block = page.getBlock(channel);
+                    values.add(type.getObjectValue(session, block, position));
+                }
+                values = Collections.unmodifiableList(values);
 
-            while (true) {
-                List<Object> values = new ArrayList<>(types.size());
-                for (BlockCursor cursor : cursors) {
-                    if (cursor.advanceNextPosition()) {
-                        values.add(cursor.getObjectValue(session));
-                    }
-                    else {
-                        checkState(values.isEmpty(), "unaligned cursors");
-                    }
-                }
-                if (values.isEmpty()) {
-                    return this;
-                }
                 rows.add(new MaterializedRow(DEFAULT_PRECISION, values));
             }
+            return this;
         }
 
         public MaterializedResult build()

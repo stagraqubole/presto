@@ -35,7 +35,7 @@ public class BooleanMaxAggregation
     protected void processInput(TriStateBooleanState state, Block block, int index)
     {
         // if value is true, update the max to true
-        if (block.getBoolean(index)) {
+        if (BOOLEAN.getBoolean(block, index)) {
             state.setByte(TRUE_VALUE);
         }
         else {

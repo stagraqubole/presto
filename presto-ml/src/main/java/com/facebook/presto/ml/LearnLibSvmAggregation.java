@@ -21,7 +21,6 @@ import com.facebook.presto.operator.aggregation.GroupedAccumulator;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
-import com.facebook.presto.spi.block.BlockCursor;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
@@ -31,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.airlift.slice.SizeOf.SIZE_OF_DOUBLE;
@@ -141,27 +141,26 @@ public class LearnLibSvmAggregation
         @Override
         public void addInput(Page page)
         {
-            BlockCursor cursor = page.getBlock(labelChannel).cursor();
-            while (cursor.advanceNextPosition()) {
+            Block block = page.getBlock(labelChannel);
+            for (int position = 0; position < block.getPositionCount(); position++) {
                 if (labelIsLong) {
-                    labels.add((double) cursor.getLong());
+                    labels.add((double) BIGINT.getLong(block, position));
                 }
                 else {
-                    labels.add(cursor.getDouble());
+                    labels.add(DOUBLE.getDouble(block, position));
                 }
             }
 
-            cursor = page.getBlock(featuresChannel).cursor();
-            while (cursor.advanceNextPosition()) {
-                FeatureVector featureVector = ModelUtils.jsonToFeatures(cursor.getSlice());
+            block = page.getBlock(featuresChannel);
+            for (int position = 0; position < block.getPositionCount(); position++) {
+                FeatureVector featureVector = ModelUtils.jsonToFeatures(VARCHAR.getSlice(block, position));
                 rowsSize += featureVector.getEstimatedSize();
                 rows.add(featureVector);
             }
 
             if (params == null) {
-                cursor = page.getBlock(paramsChannel).cursor();
-                cursor.advanceNextPosition();
-                params = LibSvmUtils.parseParameters(cursor.getSlice().toStringUtf8());
+                block = page.getBlock(paramsChannel);
+                params = LibSvmUtils.parseParameters(VARCHAR.getSlice(block, 0).toStringUtf8());
             }
         }
 
@@ -194,7 +193,7 @@ public class LearnLibSvmAggregation
             model.train(dataset);
 
             BlockBuilder builder = getFinalType().createBlockBuilder(new BlockBuilderStatus());
-            builder.appendSlice(ModelUtils.serialize(model));
+            VARCHAR.writeSlice(builder, ModelUtils.serialize(model));
 
             return builder.build();
         }

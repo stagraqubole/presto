@@ -33,7 +33,7 @@ public class LongMinAggregation
     public void processInput(LongMinState state, Block block, int index)
     {
         state.setNull(false);
-        state.setLong(Math.min(state.getLong(), block.getLong(index)));
+        state.setLong(Math.min(state.getLong(), BIGINT.getLong(block, index)));
     }
 
     public interface LongMinState

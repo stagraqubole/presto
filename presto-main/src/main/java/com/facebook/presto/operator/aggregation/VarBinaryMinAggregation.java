@@ -32,7 +32,7 @@ public class VarBinaryMinAggregation
     @Override
     protected void processInput(SliceState state, Block block, int index)
     {
-        state.setSlice(min(state.getSlice(), block.getSlice(index)));
+        state.setSlice(min(state.getSlice(), VARCHAR.getSlice(block, index)));
     }
 
     private static Slice min(Slice a, Slice b)

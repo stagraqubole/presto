@@ -104,10 +104,6 @@ public class Validator
 
     public boolean isSkipped()
     {
-        if (getControlResult().getState() == State.TIMEOUT || getTestResult().getState() == State.TIMEOUT) {
-            return true;
-        }
-
         if (!checkCorrectness) {
             return false;
         }
@@ -121,6 +117,10 @@ public class Validator
         }
 
         if (!isDeterministic()) {
+            return true;
+        }
+
+        if (getTestResult().getState() == State.TIMEOUT) {
             return true;
         }
 
@@ -232,7 +232,7 @@ public class Validator
     private QueryResult executeQuery(String url, String username, String password, Query query, Duration timeout)
     {
         try (Connection connection = DriverManager.getConnection(url, username, password)) {
-            connection.setClientInfo("ApplicationName", "verifier-test-" + queryPair.getName());
+            connection.setClientInfo("ApplicationName", "verifier-test:" + queryPair.getName());
             connection.setCatalog(query.getCatalog());
             connection.setSchema(query.getSchema());
             long start = System.nanoTime();

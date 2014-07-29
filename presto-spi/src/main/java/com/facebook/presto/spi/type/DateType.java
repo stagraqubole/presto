@@ -14,15 +14,12 @@
 package com.facebook.presto.spi.type;
 
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
-import com.facebook.presto.spi.block.BlockCursor;
-import com.facebook.presto.spi.block.BlockEncodingFactory;
-import com.facebook.presto.spi.block.FixedWidthBlockUtil.FixedWidthBlockBuilderFactory;
+import com.facebook.presto.spi.block.FixedWidthBlockBuilder;
 import io.airlift.slice.Slice;
-import io.airlift.slice.SliceOutput;
 
-import static com.facebook.presto.spi.block.FixedWidthBlockUtil.createIsolatedFixedWidthBlockBuilderFactory;
 import static com.facebook.presto.spi.type.TimeZoneIndex.getTimeZoneForKey;
 import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 
@@ -44,18 +41,26 @@ public final class DateType
         return DATE;
     }
 
-    private static final FixedWidthBlockBuilderFactory BLOCK_BUILDER_FACTORY = createIsolatedFixedWidthBlockBuilderFactory(DATE);
-    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = BLOCK_BUILDER_FACTORY.getBlockEncodingFactory();
-
     private DateType()
     {
     }
 
     @Override
-
     public String getName()
     {
         return "date";
+    }
+
+    @Override
+    public boolean isComparable()
+    {
+        return true;
+    }
+
+    @Override
+    public boolean isOrderable()
+    {
+        return true;
     }
 
     @Override
@@ -71,115 +76,115 @@ public final class DateType
     }
 
     @Override
-    public Object getObjectValue(ConnectorSession session, Slice slice, int offset)
+    public Object getObjectValue(ConnectorSession session, Block block, int position)
     {
+        if (block.isNull(position)) {
+            return null;
+        }
+
         // convert date to timestamp at midnight in local time zone
-        long date = slice.getLong(offset);
+        long date = block.getLong(position, 0);
         return new SqlDate(date - getTimeZoneForKey(session.getTimeZoneKey()).getOffset(date), session.getTimeZoneKey());
     }
 
     @Override
     public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus)
     {
-        return BLOCK_BUILDER_FACTORY.createFixedWidthBlockBuilder(blockBuilderStatus);
+        return new FixedWidthBlockBuilder(getFixedSize(), blockBuilderStatus);
     }
 
     @Override
     public BlockBuilder createFixedSizeBlockBuilder(int positionCount)
     {
-        return BLOCK_BUILDER_FACTORY.createFixedWidthBlockBuilder(positionCount);
+        return new FixedWidthBlockBuilder(getFixedSize(), positionCount);
     }
 
     @Override
-    public boolean getBoolean(Slice slice, int offset)
+    public boolean equalTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void writeBoolean(SliceOutput sliceOutput, boolean value)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public long getLong(Slice slice, int offset)
-    {
-        return slice.getLong(offset);
-    }
-
-    @Override
-    public void writeLong(SliceOutput sliceOutput, long value)
-    {
-        sliceOutput.writeLong(value);
-    }
-
-    @Override
-    public double getDouble(Slice slice, int offset)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void writeDouble(SliceOutput sliceOutput, double value)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Slice getSlice(Slice slice, int offset)
-    {
-        return slice.slice(offset, getFixedSize());
-    }
-
-    @Override
-    public void writeSlice(SliceOutput sliceOutput, Slice value, int offset)
-    {
-        sliceOutput.writeBytes(value, offset, SIZE_OF_LONG);
-    }
-
-    @Override
-    public boolean equalTo(Slice leftSlice, int leftOffset, Slice rightSlice, int rightOffset)
-    {
-        long leftValue = leftSlice.getLong(leftOffset);
-        long rightValue = rightSlice.getLong(rightOffset);
+        long leftValue = leftBlock.getLong(leftPosition, 0);
+        long rightValue = rightBlock.getLong(rightPosition, 0);
         return leftValue == rightValue;
     }
 
     @Override
-    public boolean equalTo(Slice leftSlice, int leftOffset, BlockCursor rightCursor)
+    public int hash(Block block, int position)
     {
-        long leftValue = leftSlice.getLong(leftOffset);
-        long rightValue = rightCursor.getLong();
-        return leftValue == rightValue;
-    }
-
-    @Override
-    public int hash(Slice slice, int offset)
-    {
-        long value = slice.getLong(offset);
+        long value = block.getLong(position, 0);
         return (int) (value ^ (value >>> 32));
     }
 
     @Override
-    public int compareTo(Slice leftSlice, int leftOffset, Slice rightSlice, int rightOffset)
+    public int compareTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
-        long leftValue = leftSlice.getLong(leftOffset);
-        long rightValue = rightSlice.getLong(rightOffset);
+        long leftValue = leftBlock.getLong(leftPosition, 0);
+        long rightValue = rightBlock.getLong(rightPosition, 0);
         return Long.compare(leftValue, rightValue);
     }
 
     @Override
-    public void appendTo(Slice slice, int offset, BlockBuilder blockBuilder)
+    public void appendTo(Block block, int position, BlockBuilder blockBuilder)
     {
-        long value = slice.getLong(offset);
-        blockBuilder.appendLong(value);
+        if (block.isNull(position)) {
+            blockBuilder.appendNull();
+        }
+        else {
+            blockBuilder.writeLong(block.getLong(position, 0)).closeEntry();
+        }
     }
 
     @Override
-    public void appendTo(Slice slice, int offset, SliceOutput sliceOutput)
+    public boolean getBoolean(Block block, int position)
     {
-        sliceOutput.writeBytes(slice, offset, (int) SIZE_OF_LONG);
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void writeBoolean(BlockBuilder blockBuilder, boolean value)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long getLong(Block block, int position)
+    {
+        return block.getLong(position, 0);
+    }
+
+    @Override
+    public void writeLong(BlockBuilder blockBuilder, long value)
+    {
+        blockBuilder.writeLong(value).closeEntry();
+    }
+
+    @Override
+    public double getDouble(Block block, int position)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void writeDouble(BlockBuilder blockBuilder, double value)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Slice getSlice(Block block, int position)
+    {
+        return block.getSlice(position, 0, getFixedSize());
+    }
+
+    @Override
+    public void writeSlice(BlockBuilder blockBuilder, Slice value)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void writeSlice(BlockBuilder blockBuilder, Slice value, int offset, int length)
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

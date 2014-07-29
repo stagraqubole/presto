@@ -23,10 +23,10 @@ import com.facebook.presto.byteCode.control.LookupSwitch.LookupSwitchBuilder;
 import com.facebook.presto.byteCode.instruction.Constant;
 import com.facebook.presto.byteCode.instruction.LabelNode;
 import com.facebook.presto.byteCode.instruction.VariableInstruction;
+import com.facebook.presto.metadata.FunctionRegistry;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.OperatorType;
 import com.facebook.presto.spi.RecordCursor;
-import com.facebook.presto.spi.block.BlockCursor;
 import com.facebook.presto.spi.type.TimeZoneKey;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.tree.ArithmeticExpression;
@@ -34,6 +34,7 @@ import com.facebook.presto.sql.tree.AstVisitor;
 import com.facebook.presto.sql.tree.BetweenPredicate;
 import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.Cast;
+import com.facebook.presto.sql.tree.InputReference;
 import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.DoubleLiteral;
@@ -42,8 +43,6 @@ import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.GenericLiteral;
 import com.facebook.presto.sql.tree.InListExpression;
 import com.facebook.presto.sql.tree.InPredicate;
-import com.facebook.presto.sql.tree.Input;
-import com.facebook.presto.sql.tree.InputReference;
 import com.facebook.presto.sql.tree.IntervalLiteral;
 import com.facebook.presto.sql.tree.IsNullPredicate;
 import com.facebook.presto.sql.tree.LikePredicate;
@@ -217,11 +216,10 @@ public class ByteCodeExpressionVisitor
     @Override
     public ByteCodeNode visitInputReference(InputReference node, CompilerContext context)
     {
-        Input input = node.getInput();
-        int channel = input.getChannel();
+        int channel = node.getChannel();
 
         Type type = expressionTypes.get(node);
-        checkState(type != null, "No type for input %s", input);
+        checkState(type != null, "No type for input %d", channel);
         Class<?> javaType = type.getJavaType();
 
         if (sourceIsCursor) {
@@ -268,35 +266,44 @@ public class ByteCodeExpressionVisitor
         }
         else {
             Block isNullCheck = new Block(context)
-                    .setDescription(format("channel_%d.get%s()", channel, type))
-                    .getVariable("channel_" + channel)
-                    .invokeInterface(BlockCursor.class, "isNull", boolean.class);
+                    .setDescription(format("block_%d.isNull(position)", channel))
+                    .getVariable("block_" + channel)
+                    .getVariable("position")
+                    .invokeInterface(com.facebook.presto.spi.block.Block.class, "isNull", boolean.class, int.class);
 
             Block isNull = new Block(context)
                     .putVariable("wasNull", true)
                     .pushJavaDefault(javaType);
             if (javaType == boolean.class) {
                 Block isNotNull = new Block(context)
-                        .getVariable("channel_" + channel)
-                        .invokeInterface(BlockCursor.class, "getBoolean", boolean.class);
+                        .invokeStatic(type.getClass(), "getInstance", type.getClass())
+                        .getVariable("block_" + channel)
+                        .getVariable("position")
+                        .invokeVirtual(type.getClass(), "getBoolean", boolean.class, com.facebook.presto.spi.block.Block.class, int.class);
                 return new IfStatement(context, isNullCheck, isNull, isNotNull);
             }
             else if (javaType == long.class) {
                 Block isNotNull = new Block(context)
-                        .getVariable("channel_" + channel)
-                        .invokeInterface(BlockCursor.class, "getLong", long.class);
+                        .invokeStatic(type.getClass(), "getInstance", type.getClass())
+                        .getVariable("block_" + channel)
+                        .getVariable("position")
+                        .invokeVirtual(type.getClass(), "getLong", long.class, com.facebook.presto.spi.block.Block.class, int.class);
                 return new IfStatement(context, isNullCheck, isNull, isNotNull);
             }
             else if (javaType == double.class) {
                 Block isNotNull = new Block(context)
-                        .getVariable("channel_" + channel)
-                        .invokeInterface(BlockCursor.class, "getDouble", double.class);
+                        .invokeStatic(type.getClass(), "getInstance", type.getClass())
+                        .getVariable("block_" + channel)
+                        .getVariable("position")
+                        .invokeVirtual(type.getClass(), "getDouble", double.class, com.facebook.presto.spi.block.Block.class, int.class);
                 return new IfStatement(context, isNullCheck, isNull, isNotNull);
             }
             else if (javaType == Slice.class) {
                 Block isNotNull = new Block(context)
-                        .getVariable("channel_" + channel)
-                        .invokeInterface(BlockCursor.class, "getSlice", Slice.class);
+                        .invokeStatic(type.getClass(), "getInstance", type.getClass())
+                        .getVariable("block_" + channel)
+                        .getVariable("position")
+                        .invokeVirtual(type.getClass(), "getSlice", Slice.class, com.facebook.presto.spi.block.Block.class, int.class);
                 return new IfStatement(context, isNullCheck, isNull, isNotNull);
             }
             else {
@@ -812,8 +819,9 @@ public class ByteCodeExpressionVisitor
     protected ByteCodeNode visitNullIfExpression(NullIfExpression node, CompilerContext context)
     {
         ByteCodeNode first = process(node.getFirst(), context);
-        Type firstType = expressionTypes.get(node.getFirst());
         ByteCodeNode second = process(node.getSecond(), context);
+        Type firstType = expressionTypes.get(node.getFirst());
+        Type secondType = expressionTypes.get(node.getSecond());
 
         LabelNode notMatch = new LabelNode("notMatch");
 
@@ -823,12 +831,31 @@ public class ByteCodeExpressionVisitor
                 .append(first)
                 .append(ifWasNullPopAndGoto(context, notMatch, void.class));
 
-        // if (equal(dupe(first), second)
+        // this is a hack! We shouldn't be determining type coercions at this point, but there's no way
+        // around it in the current expression AST
+        Type commonType = FunctionRegistry.getCommonSuperType(firstType, secondType).get();
+
+        FunctionBinding castFirst = bootstrapFunctionBinder.bindCastOperator(
+                getSessionByteCode,
+                new Block(context).dup(firstType.getJavaType()),
+                firstType,
+                commonType);
+
+        FunctionBinding castSecond = bootstrapFunctionBinder.bindCastOperator(
+                getSessionByteCode,
+                second,
+                secondType,
+                commonType);
+
+        // if (equal(cast(first as <common type>), cast(second as <common type>))
         FunctionBinding functionBinding = bootstrapFunctionBinder.bindOperator(
                 OperatorType.EQUAL,
                 getSessionByteCode,
-                ImmutableList.of(new Block(context).dup(firstType.getJavaType()), second),
+                ImmutableList.of(
+                        visitFunctionBinding(context, castFirst, "cast(first)"),
+                        visitFunctionBinding(context, castSecond, "cast(second)")),
                 types(node.getFirst(), node.getSecond()));
+
         ByteCodeNode equalsCall = visitFunctionBinding(context, functionBinding, "equal");
 
         Block conditionBlock = new Block(context)

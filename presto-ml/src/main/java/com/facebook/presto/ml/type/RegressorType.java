@@ -25,7 +25,7 @@ public class RegressorType
 {
     public static final RegressorType REGRESSOR = new RegressorType();
 
-    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = new VariableWidthBlockEncoding.VariableWidthBlockEncodingFactory(REGRESSOR);
+    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = new VariableWidthBlockEncoding.VariableWidthBlockEncodingFactory();
 
     @JsonCreator
     public RegressorType()

@@ -35,7 +35,7 @@ public class BooleanMinAggregation
     protected void processInput(TriStateBooleanState state, Block block, int index)
     {
         // if value is false, update the min to false
-        if (!block.getBoolean(index)) {
+        if (!BOOLEAN.getBoolean(block, index)) {
             state.setByte(FALSE_VALUE);
         }
         else {

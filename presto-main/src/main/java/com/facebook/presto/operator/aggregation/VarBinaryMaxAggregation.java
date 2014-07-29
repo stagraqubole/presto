@@ -32,7 +32,7 @@ public class VarBinaryMaxAggregation
     @Override
     protected void processInput(SliceState state, Block block, int index)
     {
-        state.setSlice(max(state.getSlice(), block.getSlice(index)));
+        state.setSlice(max(state.getSlice(), VARCHAR.getSlice(block, index)));
     }
 
     private static Slice max(Slice a, Slice b)

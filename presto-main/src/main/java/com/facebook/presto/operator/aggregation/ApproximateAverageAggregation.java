@@ -17,7 +17,6 @@ import com.facebook.presto.operator.aggregation.state.AccumulatorState;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.type.Type;
-import io.airlift.slice.Slices;
 
 import static com.facebook.presto.operator.aggregation.ApproximateUtils.formatApproximateResult;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
@@ -25,7 +24,7 @@ import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 
 public class ApproximateAverageAggregation
-        extends AbstractApproximateAggregationFunction<ApproximateAverageAggregation.ApproximateAverageState>
+        extends AbstractAggregationFunction<ApproximateAverageAggregation.ApproximateAverageState>
 {
     public interface ApproximateAverageState
             extends AccumulatorState
@@ -52,7 +51,7 @@ public class ApproximateAverageAggregation
     public ApproximateAverageAggregation(Type parameterType)
     {
         // Intermediate type should be a fixed width structure
-        super(VARCHAR, VARCHAR, parameterType);
+        super(VARCHAR, VARCHAR, parameterType, true);
 
         if (parameterType == BIGINT) {
             this.inputIsLong = true;
@@ -70,10 +69,10 @@ public class ApproximateAverageAggregation
     {
         double inputValue;
         if (inputIsLong) {
-            inputValue = block.getLong(index);
+            inputValue = BIGINT.getLong(block, index);
         }
         else {
-            inputValue = block.getDouble(index);
+            inputValue = DOUBLE.getDouble(block, index);
         }
 
         long currentCount = state.getCount();
@@ -128,7 +127,7 @@ public class ApproximateAverageAggregation
         }
         else {
             String result = formatApproximateAverage(state.getSamples(), state.getMean(), state.getM2() / state.getCount(), confidence);
-            out.appendSlice(Slices.utf8Slice(result));
+            VARCHAR.writeString(out, result);
         }
     }
 

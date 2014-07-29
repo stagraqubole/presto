@@ -32,6 +32,6 @@ public class LongSumAggregation
     public void processInput(NullableLongState state, Block block, int index)
     {
         state.setNull(false);
-        state.setLong(state.getLong() + block.getLong(index));
+        state.setLong(state.getLong() + BIGINT.getLong(block, index));
     }
 }

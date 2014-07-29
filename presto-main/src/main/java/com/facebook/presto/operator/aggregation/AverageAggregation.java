@@ -23,7 +23,7 @@ import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 
 public class AverageAggregation
-        extends AbstractAggregationFunction<LongAndDoubleState>
+        extends AbstractExactAggregationFunction<LongAndDoubleState>
 {
     private final boolean inputIsLong;
 
@@ -49,10 +49,10 @@ public class AverageAggregation
 
         double value;
         if (inputIsLong) {
-            value = block.getLong(index);
+            value = BIGINT.getLong(block, index);
         }
         else {
-            value = block.getDouble(index);
+            value = DOUBLE.getDouble(block, index);
         }
         state.setDouble(state.getDouble() + value);
     }
@@ -73,7 +73,7 @@ public class AverageAggregation
         }
         else {
             double value = state.getDouble();
-            out.appendDouble(value / count);
+            DOUBLE.writeDouble(out, value / count);
         }
     }
 }

@@ -16,24 +16,23 @@ package com.facebook.presto.operator.aggregation;
 import com.facebook.presto.operator.aggregation.state.VarianceState;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
-import io.airlift.slice.Slices;
 
-import static com.facebook.presto.operator.aggregation.ApproximateUtils.formatApproximateResult;
-import static com.facebook.presto.operator.aggregation.ApproximateUtils.sumError;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.mergeVarianceState;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.updateVarianceState;
+import static com.facebook.presto.operator.aggregation.ApproximateUtils.formatApproximateResult;
+import static com.facebook.presto.operator.aggregation.ApproximateUtils.sumError;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 
 public class ApproximateLongSumAggregation
-        extends AbstractApproximateAggregationFunction<ApproximateLongSumAggregation.ApproximateLongSumState>
+        extends AbstractAggregationFunction<ApproximateLongSumAggregation.ApproximateLongSumState>
 {
     public static final ApproximateLongSumAggregation LONG_APPROXIMATE_SUM_AGGREGATION = new ApproximateLongSumAggregation();
 
     public ApproximateLongSumAggregation()
     {
         // TODO: Change intermediate to fixed width, once we have a better type system
-        super(VARCHAR, VARCHAR, BIGINT);
+        super(VARCHAR, VARCHAR, BIGINT, true);
     }
 
     public interface ApproximateLongSumState
@@ -51,7 +50,7 @@ public class ApproximateLongSumAggregation
     @Override
     protected void processInput(ApproximateLongSumState state, Block block, int index, long sampleWeight)
     {
-        long value = block.getLong(index);
+        long value = BIGINT.getLong(block, index);
 
         state.setWeightedCount(state.getWeightedCount() + sampleWeight);
         state.setSum(state.getSum() + value * sampleWeight);
@@ -79,6 +78,6 @@ public class ApproximateLongSumAggregation
                 sumError(state.getCount(), state.getWeightedCount(), state.getM2(), state.getMean()),
                 confidence,
                 true);
-        out.appendSlice(Slices.utf8Slice(result));
+        VARCHAR.writeString(out, result);
     }
 }

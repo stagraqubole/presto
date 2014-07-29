@@ -14,24 +14,17 @@
 package com.facebook.presto.type;
 
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
-import com.facebook.presto.spi.block.BlockCursor;
-import com.facebook.presto.spi.block.BlockEncodingFactory;
-import com.facebook.presto.spi.block.FixedWidthBlockUtil.FixedWidthBlockBuilderFactory;
+import com.facebook.presto.spi.block.FixedWidthBlockBuilder;
 import com.facebook.presto.spi.type.FixedWidthType;
 import io.airlift.slice.Slice;
-import io.airlift.slice.SliceOutput;
-
-import static com.facebook.presto.spi.block.FixedWidthBlockUtil.createIsolatedFixedWidthBlockBuilderFactory;
 
 public final class UnknownType
         implements FixedWidthType
 {
     public static final UnknownType UNKNOWN = new UnknownType();
-
-    private static final FixedWidthBlockBuilderFactory BLOCK_BUILDER_FACTORY = createIsolatedFixedWidthBlockBuilderFactory(UNKNOWN);
-    public static final BlockEncodingFactory<?> BLOCK_ENCODING_FACTORY = BLOCK_BUILDER_FACTORY.getBlockEncodingFactory();
 
     private UnknownType()
     {
@@ -41,6 +34,18 @@ public final class UnknownType
     public String getName()
     {
         return "unknown";
+    }
+
+    @Override
+    public boolean isComparable()
+    {
+        return false;
+    }
+
+    @Override
+    public boolean isOrderable()
+    {
+        return false;
     }
 
     @Override
@@ -56,104 +61,99 @@ public final class UnknownType
     }
 
     @Override
-    public Object getObjectValue(ConnectorSession session, Slice slice, int offset)
+    public Object getObjectValue(ConnectorSession session, Block block, int position)
     {
-        // This type is always null, so this method should never be called
-        throw new UnsupportedOperationException();
+        // call is null in case position is out of bounds
+        block.isNull(position);
+        return null;
     }
 
     @Override
     public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus)
     {
-        return BLOCK_BUILDER_FACTORY.createFixedWidthBlockBuilder(blockBuilderStatus);
+        return new FixedWidthBlockBuilder(getFixedSize(), blockBuilderStatus);
     }
 
     @Override
     public BlockBuilder createFixedSizeBlockBuilder(int positionCount)
     {
-        return BLOCK_BUILDER_FACTORY.createFixedWidthBlockBuilder(positionCount);
+        return new FixedWidthBlockBuilder(getFixedSize(), positionCount);
     }
 
     @Override
-    public boolean getBoolean(Slice slice, int offset)
+    public int hash(Block block, int position)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void writeBoolean(SliceOutput sliceOutput, boolean value)
+    public boolean equalTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public long getLong(Slice slice, int offset)
+    public int compareTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void writeLong(SliceOutput sliceOutput, long value)
+    public void appendTo(Block block, int position, BlockBuilder blockBuilder)
+    {
+        blockBuilder.appendNull();
+    }
+
+    @Override
+    public boolean getBoolean(Block block, int position)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public double getDouble(Slice slice, int offset)
+    public void writeBoolean(BlockBuilder blockBuilder, boolean value)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void writeDouble(SliceOutput sliceOutput, double value)
+    public long getLong(Block block, int position)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public Slice getSlice(Slice slice, int offset)
+    public void writeLong(BlockBuilder blockBuilder, long value)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void writeSlice(SliceOutput sliceOutput, Slice value, int offset)
+    public double getDouble(Block block, int position)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean equalTo(Slice leftSlice, int leftOffset, Slice rightSlice, int rightOffset)
+    public void writeDouble(BlockBuilder blockBuilder, double value)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean equalTo(Slice leftSlice, int leftOffset, BlockCursor rightCursor)
+    public Slice getSlice(Block block, int position)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public int hash(Slice slice, int offset)
+    public void writeSlice(BlockBuilder blockBuilder, Slice value)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public int compareTo(Slice leftSlice, int leftOffset, Slice rightSlice, int rightOffset)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void appendTo(Slice slice, int offset, BlockBuilder blockBuilder)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void appendTo(Slice slice, int offset, SliceOutput sliceOutput)
+    public void writeSlice(BlockBuilder blockBuilder, Slice value, int offset, int length)
     {
         throw new UnsupportedOperationException();
     }

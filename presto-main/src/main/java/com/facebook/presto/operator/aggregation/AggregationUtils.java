@@ -25,21 +25,18 @@ public final class AggregationUtils
     {
     }
 
-    public static AggregationFunction createIsolatedApproximateAggregation(Class<? extends AbstractApproximateAggregationFunction> aggregationClass, Type parameterType)
+    public static AggregationFunction createIsolatedApproximateAggregation(Class<? extends AbstractAggregationFunction> aggregationClass, Type parameterType)
     {
         Class<? extends AggregationFunction> functionClass = IsolatedClass.isolateClass(
                 AggregationFunction.class,
 
                 aggregationClass,
 
-                AbstractApproximateAggregationFunction.class,
-                SimpleAggregationFunction.class,
+                AbstractAggregationFunction.class,
 
-                AbstractApproximateAggregationFunction.GenericGroupedAccumulator.class,
-                SimpleAggregationFunction.SimpleGroupedAccumulator.class,
+                AbstractAggregationFunction.GenericGroupedAccumulator.class,
 
-                AbstractApproximateAggregationFunction.GenericAccumulator.class,
-                SimpleAggregationFunction.SimpleAccumulator.class);
+                AbstractAggregationFunction.GenericAccumulator.class);
 
         try {
             return functionClass
@@ -59,13 +56,11 @@ public final class AggregationUtils
                 aggregationClass,
 
                 AbstractAggregationFunction.class,
-                SimpleAggregationFunction.class,
+                AbstractExactAggregationFunction.class,
 
-                AbstractAggregationFunction.GenericGroupedAccumulator.class,
-                SimpleAggregationFunction.SimpleGroupedAccumulator.class,
+                AbstractExactAggregationFunction.GenericGroupedAccumulator.class,
 
-                AbstractAggregationFunction.GenericAccumulator.class,
-                SimpleAggregationFunction.SimpleAccumulator.class);
+                AbstractExactAggregationFunction.GenericAccumulator.class);
 
         try {
             return functionClass
