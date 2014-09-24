@@ -14,28 +14,16 @@
 package com.facebook.presto.hive;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
 import static java.lang.String.format;
 import io.airlift.log.Logger;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.common.FileUtils;
-
-import com.facebook.presto.spi.PrestoException;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-
-import static com.facebook.presto.hadoop.HadoopFileSystem.removePathFromCache;
 
 public final class HiveFSUtils
 {
