@@ -15,7 +15,6 @@ package com.facebook.presto.hive;
 
 import com.facebook.presto.hadoop.HadoopFileSystemCache;
 import com.facebook.presto.hadoop.HadoopNative;
-import com.facebook.presto.hive.shaded.org.apache.thrift.TException;
 import com.facebook.presto.hive.metastore.HiveMetastore;
 import com.facebook.presto.hive.util.BoundedExecutor;
 import com.facebook.presto.spi.ColumnMetadata;
@@ -84,6 +83,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.mapred.JobConf;
+import com.facebook.presto.hive.shaded.org.apache.thrift.TException;
 import org.joda.time.DateTimeZone;
 
 import java.io.IOException;
@@ -160,8 +160,6 @@ import static com.facebook.presto.hive.HiveFSUtils.pathExists;
 import static com.facebook.presto.hive.HiveFSUtils.createDirectories;
 import static com.facebook.presto.hive.HiveFSUtils.isDirectory;
 import static com.facebook.presto.hive.HiveFSUtils.rename;
-import static com.facebook.presto.hive.HiveFSUtils.checkConsistency;
-import static com.facebook.presto.hive.HiveFSUtils.getFileSystem;
 import static com.facebook.presto.hive.HiveFSUtils.getPartitionValues;
 import static com.facebook.presto.hive.HiveFSUtils.delete;
 
@@ -178,7 +176,7 @@ public class HiveClient
 
     private static final Logger log = Logger.get(HiveClient.class);
     private static final int partionCommitBatchSize = 8;
-    private static final int RENAME_THREADPOOL_SIZE = 20;
+    private static final int renameThreadPoolSize = 20;
 
     private final String connectorId;
     private final int maxOutstandingSplits;
@@ -982,9 +980,6 @@ public class HiveClient
 
     private void rollbackInsertChanges(HiveInsertTableHandle handle, Map<String, List<String>> filesWritten)
     {
-        // Failures in TableWrite stage for Insert Overwrites( also Insert Into without temp location) will still leave
-        // back files. This rollback only takes care of rollback of commit phase changes.
-
         Path tableLocation = new Path(handle.getTargetPath());
         try {
             for (String partition : filesWritten.keySet()) {
@@ -1001,8 +996,7 @@ public class HiveClient
             }
         }
         catch (IOException e) {
-            log.error(String.format("Manually delete files prefixed with '%s' at '%s'.
-                                    Rollback of changes made during insert failed with %s.",
+            log.error(String.format("Manually delete files prefixed with '%s' at '%s'. Rollback of changes made during insert failed with %s.",
                                     handle.getFilePrefix(),
                                     handle.getTargetPath(),
                                     e.getStackTrace()));
@@ -1022,7 +1016,7 @@ public class HiveClient
             // Get info about all the existing partitions
             Set<String> partitionsKnown = new HashSet<String>();
             ConnectorPartitionResult result = getPartitions(new SchemaTableName(handle.getSchemaName(), handle.getTableName()),
-                                                            TupleDomain.<ConnectorColumnHandle>all());
+                                                TupleDomain.<ConnectorColumnHandle>all());
             List<ConnectorPartition> partitions = result.getPartitions();
             Iterator<ConnectorPartition> pIter = partitions.iterator();
 
@@ -1052,6 +1046,11 @@ public class HiveClient
         checkNotNull(tupleDomain, "tupleDomain is null");
         SchemaTableName tableName = getTableName(tableHandle);
 
+        return getPartitions(tableName, tupleDomain);
+    }
+
+    public ConnectorPartitionResult getPartitions(SchemaTableName tableName, TupleDomain<ConnectorColumnHandle> tupleDomain)
+    {
         List<FieldSchema> partitionKeys;
         Optional<HiveBucket> bucket;
 
@@ -1507,7 +1506,7 @@ public class HiveClient
         };
     }
 
-    private String createTemporaryPath(Path basePath)
+    private String createTemporaryPath(Path targetPath)
     {
         // use a per-user temporary directory to avoid permission problems
         // TODO: this should use Hadoop UserGroupInformation
@@ -1524,7 +1523,7 @@ public class HiveClient
     private void moveInsertIntoData(HiveInsertTableHandle handle, Map<String, List<String>> filesWritten) throws IOException
     {
         ExecutorService executor = Executors.newFixedThreadPool(
-                RENAME_THREADPOOL_SIZE,
+                renameThreadPoolSize,
                 new ThreadFactoryBuilder().setNameFormat("hive-client-rename-" + "-%d").build());
 
         for (String partition : filesWritten.keySet()) {

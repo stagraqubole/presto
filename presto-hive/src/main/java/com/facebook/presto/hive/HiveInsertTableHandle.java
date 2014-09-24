@@ -39,8 +39,6 @@ public class HiveInsertTableHandle implements ConnectorInsertTableHandle
     private final String serdeLib;
     private final Map<String, String> serdeParameters;
     private final List<Boolean> partitionBitmap;
-    private final boolean forInsertOverwrite;
-    private final boolean forInsertDirectory;
     private final String filePrefix;
 
     @JsonCreator
@@ -56,8 +54,6 @@ public class HiveInsertTableHandle implements ConnectorInsertTableHandle
             @JsonProperty("serdeLib") String serdeLib,
             @JsonProperty("serdeParameters") Map<String, String> serdeParameters,
             @JsonProperty("partitionBitmap") List<Boolean> partitionBitmap,
-            @JsonProperty("forInsertOverwrite") boolean forInsertOverwrite,
-            @JsonProperty("forInsertDirectory") boolean forInsertDirectory,
             @JsonProperty("filePrefix") String filePrefix)
     {
         this.schemaName = schemaName;
@@ -76,8 +72,6 @@ public class HiveInsertTableHandle implements ConnectorInsertTableHandle
         this.serdeLib = serdeLib;
         this.serdeParameters = serdeParameters;
         this.partitionBitmap = partitionBitmap;
-        this.forInsertOverwrite = forInsertOverwrite;
-        this.forInsertDirectory = forInsertDirectory;
         this.filePrefix = filePrefix;
     }
 
@@ -133,18 +127,6 @@ public class HiveInsertTableHandle implements ConnectorInsertTableHandle
     public List<Boolean> getPartitionBitmap()
     {
         return partitionBitmap;
-    }
-
-    @JsonProperty("forInsertOverwrite")
-    public boolean forInsertOverwrite()
-    {
-        return forInsertOverwrite;
-    }
-
-    @JsonProperty
-    public boolean forInsertDirectory()
-    {
-        return forInsertDirectory;
     }
 
     @JsonProperty
