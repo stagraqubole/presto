@@ -62,6 +62,9 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 
 import static com.facebook.presto.hive.HiveBucketing.HiveBucket;
 import static com.facebook.presto.hive.HiveType.HIVE_INT;
@@ -79,6 +82,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.collect.Maps.uniqueIndex;
 import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
+import static com.google.common.collect.Iterables.transform;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.airlift.testing.Assertions.assertInstanceOf;
@@ -90,6 +94,8 @@ import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
+
+import org.apache.hadoop.fs.Path;
 
 @Test(groups = "hive")
 public abstract class AbstractTestHiveClient
@@ -140,6 +146,12 @@ public abstract class AbstractTestHiveClient
     protected ConnectorRecordSetProvider recordSetProvider;
     protected ConnectorRecordSinkProvider recordSinkProvider;
 
+    protected SchemaTableName insertTableDestination;
+    protected SchemaTableName insertTablePartitionedDestination;
+    protected List<ConnectorSplit> insertCleanupSplits;
+    protected List<HivePartition> insertedPartitions;
+    protected List<String> originalSplits;
+
     protected void setupHive(String connectorId, String databaseName, String timeZoneId)
     {
         database = databaseName;
@@ -153,6 +165,11 @@ public abstract class AbstractTestHiveClient
         tableBucketedBigintBoolean = new SchemaTableName(database, "presto_test_bucketed_by_bigint_boolean");
         tableBucketedDoubleFloat = new SchemaTableName(database, "presto_test_bucketed_by_double_float");
         tablePartitionSchemaChange = new SchemaTableName(database, "presto_test_partition_schema_change");
+
+        insertTableDestination = new SchemaTableName(database, "presto_insert_destination");
+        insertTablePartitionedDestination = new SchemaTableName(database, "presto_insert_destination_partitioned");
+        insertCleanupSplits = new ArrayList<ConnectorSplit>();
+        insertedPartitions = new ArrayList<HivePartition>();
 
         temporaryCreateTable = new SchemaTableName(database, "tmp_presto_test_create_" + randomName());
         temporaryCreateSampledTable = new SchemaTableName(database, "tmp_presto_test_create_" + randomName());
@@ -1150,6 +1167,291 @@ public abstract class AbstractTestHiveClient
 
             assertFalse(cursor.advanceNextPosition());
         }
+    }
+
+    @Test
+    public void testInsertIntoTable()
+            throws Exception
+    {
+        try {
+            //load existing table
+            ConnectorTableHandle tableHandle = getTableHandle(insertTableDestination);
+            List<ConnectorColumnHandle> columnHandles = ImmutableList.copyOf(metadata.getColumnHandles(tableHandle).values());
+
+            //verify that table has pre-defined data existing and nothing more
+            String[] originalCol1Data = {"Val1", "Val2"};
+            Integer[] originalCol2Data = {1, 2};
+
+            String[] insertedCol1Data = {"Val3", "Val4"};
+            Integer[] insertedCol2Data = {3, 4};
+
+            ConnectorPartitionResult partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.<ConnectorColumnHandle>all());
+            ConnectorSplitSource splitSource = splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions());
+            ConnectorSplit originalSplit = getOnlyElement(getAllSplits(splitSource));
+            originalSplits.get().clear();
+            originalSplits.get().add(originalSplit.getInfo().toString());
+
+            try (RecordCursor cursor = recordSetProvider.getRecordSet(originalSplit, columnHandles).cursor()) {
+                verifyInsertData(cursor, Arrays.asList(originalCol1Data), Arrays.asList(originalCol2Data));
+            }
+
+            doInsertInto(insertTableDestination, insertedCol1Data, insertedCol2Data);
+
+            // confirm old and new data exists
+            tableHandle = getTableHandle(insertTableDestination);
+            partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.<ConnectorColumnHandle>all());
+            assertEquals(partitionResult.getPartitions().size(), 1);
+            splitSource = splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions());
+
+            boolean foundOriginalSplit = false;
+            List<String> col1Data;
+            List<Integer> col2Data;
+            for (ConnectorSplit split : getAllSplits(splitSource)) {
+                if (originalSplits.get().contains(split.getInfo().toString())) {
+                    foundOriginalSplit = true;
+                    col1Data = Arrays.asList(originalCol1Data);
+                    col2Data = Arrays.asList(originalCol2Data);
+                }
+                else {
+                    col1Data = Arrays.asList(insertedCol1Data);
+                    col2Data = Arrays.asList(insertedCol2Data);
+                    insertCleanupSplits.get().add(split);
+                }
+
+                try (RecordCursor cursor = recordSetProvider.getRecordSet(split, columnHandles).cursor()) {
+                    verifyInsertData(cursor, col1Data, col2Data);
+                }
+            }
+
+            assertTrue(foundOriginalSplit);
+        }
+        finally {
+            // do this to ensure next time UT is run, we start of with fresh table
+            insertCleanupData();
+        }
+    }
+
+    private void insertCleanupData()
+            throws Exception
+    {
+        for (ConnectorSplit cs : insertCleanupSplits.get()) {
+            HiveSplit split = (HiveSplit) cs;
+            Path path = new Path(split.getPath());
+            if (HiveFSUtils.pathExists(path)) {
+                HiveFSUtils.delete(path, true);
+            }
+        }
+    }
+
+    private void verifyInsertData(RecordCursor cursor, List<String> col1Data, List<Integer> col2Data)
+    {
+        assertEquals(col1Data.size(), col2Data.size());
+
+        for (int i = 0; i < col1Data.size(); i++) {
+            assertTrue(cursor.advanceNextPosition());
+            assertEquals(cursor.getSlice(0).toStringUtf8(), col1Data.get(i));
+            assertEquals(cursor.getLong(1), col2Data.get(i).intValue());
+        }
+
+        assertFalse(cursor.advanceNextPosition());
+    }
+
+    private void doInsertInto(String[] insertedCol1Data, Integer[] insertedCol2Data)
+            throws Exception
+    {
+        //begin insert
+        List<ColumnMetadata> columns = ImmutableList.<ColumnMetadata>builder()
+                .add(new ColumnMetadata("t_string", VARCHAR, 1, false))
+                .add(new ColumnMetadata("t_int", BIGINT, 2, false))
+                .build();
+
+        ConnectorInsertTableHandle insertHandle = metadata.beginInsert(SESSION, metadata.getTableHandle(SESSION, insertTableDestination));
+
+        //write data
+        RecordSink sink = recordSinkProvider.getRecordSink(insertHandle);
+
+        for (int i = 0; i < insertedCol1Data.length; i++) {
+            sink.beginRecord(1);
+            sink.appendString(insertedCol1Data[i].getBytes(UTF_8));
+            sink.appendLong(insertedCol2Data[i]);
+            sink.finishRecord();
+        }
+
+        String fragment = sink.commit();
+
+        //commit insert
+        metadata.commitInsert(insertHandle, ImmutableList.of(fragment));
+    }
+
+    @Test
+    public void testInsertIntoPartitionedTable()
+            throws Exception
+    {
+        try {
+            //load table
+            ConnectorTableHandle tableHandle = getTableHandle(insertTablePartitionedDestination);
+            ConnectorPartitionResult partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.<ConnectorColumnHandle>all());
+            ConnectorSplitSource splitSource = splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions());
+            originalSplits.get().clear();
+            originalSplits.get().addAll(ImmutableList.copyOf(transform(getAllSplits(splitSource), new Function<ConnectorSplit, String>()
+                                {
+                                    @Override
+                                    public String apply(ConnectorSplit val)
+                                    {
+                                        return val.getInfo().toString();
+                                    }
+                                })));
+
+            // read existing data in 2 partitions
+            Set<ConnectorPartition> partitions;
+            partitions = ImmutableSet.<ConnectorPartition>of(
+                    new HivePartition(insertTablePartitionedDestination,
+                            "ds=2014-03-12/dummy=1",
+                            ImmutableMap.<ConnectorColumnHandle, SerializableNativeValue>of(dsColumn,
+                                    new SerializableNativeValue(Slice.class, utf8Slice("2014-03-12")), dummyColumn, new SerializableNativeValue(Long.class, 1L)),
+                            Optional.<HiveBucket>absent()),
+                    new HivePartition(insertTablePartitionedDestination,
+                            "ds=2014-03-12/dummy=2",
+                            ImmutableMap.<ConnectorColumnHandle, SerializableNativeValue>of(dsColumn,
+                                    new SerializableNativeValue(Slice.class, utf8Slice("2014-03-12")), dummyColumn, new SerializableNativeValue(Long.class, 2L)),
+                            Optional.<HiveBucket>absent()));
+
+            this.assertExpectedPartitions(partitionResult.getPartitions(), partitions);
+
+            Map<String, List<String>> expectedCol1Data = new HashMap<String, List<String>>();
+            Map<String, List<Integer>> expectedCol2Data = new HashMap<String, List<Integer>>();
+
+            String[] col1Data = { "P1_Val1", "P1_Val2", "P2_Val1", "P2_Val2" };
+            int[] col2Data = { 1, 2, 2, 4 };
+
+            expectedCol1Data.put("ds=2014-03-12/dummy=1", ImmutableList.of(col1Data[0], col1Data[1]));
+            expectedCol1Data.put("ds=2014-03-12/dummy=2", ImmutableList.of(col1Data[2], col1Data[3]));
+            expectedCol2Data.put("ds=2014-03-12/dummy=1", ImmutableList.of(col2Data[0], col2Data[1]));
+            expectedCol2Data.put("ds=2014-03-12/dummy=2", ImmutableList.of(col2Data[2], col2Data[3]));
+
+            for (ConnectorPartition part : partitions) {
+                verifyPartitionData(tableHandle, part, expectedCol1Data, expectedCol2Data);
+            }
+
+            // insert into these 2 partitions, plus 1 new partition
+            String[] col1 = { "P1_Val3", "P2_Val3", "P3_Val1", "P3_Val2" };
+            Integer[] col2 = { 3, 6, 8, 10 };
+            String[] col3 = { "2014-03-12", "2014-03-12", "2014-03-13", "2014-03-13" };
+            Integer[] col4 = { 1, 2, 3, 3 };
+
+            doPartitionedInsertInto(col1, col2, col3, col4);
+
+            // confirm old and new data exists
+            tableHandle = getTableHandle(insertTablePartitionedDestination);
+            partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.<ConnectorColumnHandle>all());
+            assertEquals(partitionResult.getPartitions().size(), 3);
+
+            HivePartition insertedPartition = new HivePartition(insertTablePartitionedDestination,
+                                                "ds=2014-03-13/dummy=3",
+                                                ImmutableMap.<ConnectorColumnHandle, SerializableNativeValue>of(dsColumn,
+                                                        new SerializableNativeValue(Slice.class, utf8Slice("2014-03-13")), dummyColumn, new SerializableNativeValue(Long.class, 3L)),
+                                                Optional.<HiveBucket>absent());
+            insertedPartitions.get().add(insertedPartition);
+
+            partitions = ImmutableSet.<ConnectorPartition>builder()
+                    .addAll(partitions)
+                    .add(insertedPartition)
+                     .build();
+
+            assertExpectedPartitions(partitionResult.getPartitions(), partitions);
+
+            expectedCol1Data.put("ds=2014-03-13/dummy=3_new", ImmutableList.of(col1[2], col1[3]));
+            expectedCol2Data.put("ds=2014-03-13/dummy=3_new", ImmutableList.of(col2[2], col2[3]));
+            expectedCol1Data.put("ds=2014-03-12/dummy=1_new", ImmutableList.<String>builder()
+                                                            .add(col1[0])
+                                                            .build());
+            expectedCol2Data.put("ds=2014-03-12/dummy=1_new", ImmutableList.<Integer>builder()
+                                                            .add(col2[0])
+                                                            .build());
+            expectedCol1Data.put("ds=2014-03-12/dummy=2_new", ImmutableList.<String>builder()
+                                                            .add(col1[1])
+                                                            .build());
+            expectedCol2Data.put("ds=2014-03-12/dummy=2_new", ImmutableList.<Integer>builder()
+                                                            .add(col2[1])
+                                                            .build());
+
+            for (ConnectorPartition part : partitions) {
+                verifyPartitionData(tableHandle, part, expectedCol1Data, expectedCol2Data);
+            }
+        }
+        finally {
+            insertCleanupPartitioned();
+        }
+    }
+
+    private void insertCleanupPartitioned()
+            throws Exception
+        {
+            for (HivePartition partition : insertedPartitions.get()) {
+                List<String> partitionVals = ImmutableList.copyOf(transform(Arrays.asList(partition.getPartitionId().split("/")), new Function<String, String>()
+                        {
+                    @Override
+                    public String apply(String val)
+                    {
+                        return val.split("=")[1];
+                    }
+                }));
+
+                metastoreClient.dropPartition(partition.getTableName().getSchemaName(),
+                        partition.getTableName().getTableName(),
+                        partitionVals,
+                        true);
+            }
+            insertCleanupData();
+        }
+
+    private void verifyPartitionData(ConnectorTableHandle tableHandle, ConnectorPartition partition, Map<String, List<String>> col1Data, Map<String, List<Integer>> col2Data)
+            throws Exception
+    {
+        List<ConnectorColumnHandle> columnHandles = ImmutableList.copyOf(metadata.getColumnHandles(tableHandle).values());
+
+        ConnectorSplitSource splitSource = splitManager.getPartitionSplits(tableHandle, ImmutableList.<ConnectorPartition>of(partition));
+        for (ConnectorSplit split : getAllSplits(splitSource)) {
+            String key = partition.getPartitionId();
+            if (!originalSplits.contains(split.getInfo().toString())) {
+                insertCleanupSplits.add(split);
+                key = key + "_new";
+            }
+            RecordCursor cursor = recordSetProvider.getRecordSet(split, columnHandles).cursor();
+            verifyInsertData(cursor, col1Data.get(key), col2Data.get(key));
+        }
+    }
+
+    private void doPartitionedInsertInto(String[] col1, int[] col2, String[] col3, int[] col4)
+            throws Exception
+    {
+        //begin insert
+        List<ColumnMetadata> columns = ImmutableList.<ColumnMetadata>builder()
+                .add(new ColumnMetadata("t_string", VARCHAR, 1, false))
+                .add(new ColumnMetadata("t_int", BIGINT, 2, false))
+                .add(new ColumnMetadata("ds", VARCHAR, 3, true))
+                .add(new ColumnMetadata("dummy", BIGINT, 2, true))
+                .build();
+
+        ConnectorInsertTableHandle insertHandle = metadata.beginInsert(SESSION, metadata.getTableHandle(SESSION, insertTablePartitionedDestination));
+
+        //write data
+        RecordSink sink = recordSinkProvider.getRecordSink(insertHandle);
+
+        for (int i = 0; i < col1.length; i++) {
+            sink.beginRecord(1);
+            sink.appendString(col1[i].getBytes(UTF_8));
+            sink.appendLong(col2[i]);
+            sink.appendString(col3[i].getBytes(UTF_8));
+            sink.appendLong(col4[i]);
+            sink.finishRecord();
+        }
+
+        String fragment = sink.commit();
+
+        // commit insert
+        metadata.commitInsert(insertHandle, ImmutableList.of(fragment));
+
     }
 
     protected void assertGetRecordsOptional(String tableName, String fileType)

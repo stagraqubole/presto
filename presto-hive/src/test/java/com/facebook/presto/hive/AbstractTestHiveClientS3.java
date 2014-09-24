@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.ArrayList;
 
 import static com.facebook.presto.hadoop.HadoopFileStatus.isDirectory;
 import static com.facebook.presto.hive.util.Types.checkType;
@@ -59,7 +60,7 @@ import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 
 @Test(groups = "hive-s3")
-public abstract class AbstractTestHiveClientS3
+public abstract class AbstractTestHiveClientS3 extends AbstractTestHiveClient
 {
     private static final ConnectorSession SESSION = new ConnectorSession("user", "test", "default", "default", UTC_KEY, Locale.ENGLISH, null, null);
 
@@ -73,11 +74,21 @@ public abstract class AbstractTestHiveClientS3
 
     protected void setupHive(String databaseName)
     {
+        String connectorId = "hive-test";
         database = databaseName;
         tableS3 = new SchemaTableName(database, "presto_test_s3");
 
         String random = UUID.randomUUID().toString().toLowerCase().replace("-", "");
         temporaryCreateTable = new SchemaTableName(database, "tmp_presto_test_create_s3_" + random);
+
+        insertTableDestination = new SchemaTableName(database, "presto_insert_destination_s3");
+        insertTablePartitionedDestination = new SchemaTableName(database, "presto_insert_destination_partitioned_s3");
+        insertCleanupSplits = new ArrayList<ConnectorSplit>();
+        insertedPartitions = new ArrayList<HivePartition>();
+        originalSplits = new ArrayList<String>();
+
+        dsColumn = new HiveColumnHandle(connectorId, "ds", 0, HiveType.STRING, -1, true);
+        dummyColumn = new HiveColumnHandle(connectorId, "dummy", 2, HiveType.INT, -1, true);
     }
 
     protected void setup(String host, int port, String databaseName, String awsAccessKey, String awsSecretKey, String writableBucket)
@@ -107,6 +118,13 @@ public abstract class AbstractTestHiveClientS3
                 new HadoopDirectoryLister(),
                 sameThreadExecutor(),
                 new TypeRegistry());
+
+         metadata = client;
+         splitManager = client;
+         recordSetProvider = client;
+         recordSinkProvider = client;
+         tableOwner = "presto_test";
+         super.metastoreClient = metastoreClient;
     }
 
     @Test
