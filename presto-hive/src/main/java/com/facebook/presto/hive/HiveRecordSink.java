@@ -98,7 +98,6 @@ public class HiveRecordSink
 
     private final Path basePath;
     private final String fileName;
-    private final String filePrefix;
 
     private Map<String, List<String>> filesWritten; // filesWritten for each partition
 
@@ -108,7 +107,6 @@ public class HiveRecordSink
     Class<? extends HiveOutputFormat> outputFormatClass = null;
 
     private final boolean isPartitioned;
-    private final List<Type> columnTypes;
 
     private int field = -1;
 
@@ -127,8 +125,7 @@ public class HiveRecordSink
         "org.apache.hadoop.hive.serde2.columnar.LazyBinaryColumnarSerDe",
         null,
         "",
-        false,
-        handle.hasTemporaryPath());
+        false);
     }
 
     public HiveRecordSink(HiveInsertTableHandle handle, Path target, JobConf conf)
@@ -143,8 +140,7 @@ public class HiveRecordSink
             handle.getSerdeLib(),
             handle.getSerdeParameters(),
             handle.getFilePrefix(),
-            handle.isOutputTablePartitioned(),
-            handle.hasTemporaryPath());
+            handle.isOutputTablePartitioned());
 
         if (isPartitioned) {
             partitionColNames = handle.getPartitionColumnNames();
@@ -162,15 +158,12 @@ public class HiveRecordSink
             String serdeLib,
             Map<String, String> serdeParameters,
             String filePrefix,
-            boolean isPartitioned,
-            boolean hasTemporaryPath)
+            boolean isPartitioned)
     {
         fieldCount = columnNames.size();
         dataFieldsCount = dataColumnNames.size();
         this.conf = conf;
-        this.filePrefix = filePrefix;
         this.isPartitioned = isPartitioned;
-        this.columnTypes = columnTypes;
 
         sampleWeightField = columnNames.indexOf(SAMPLE_WEIGHT_COLUMN_NAME);
 
@@ -220,8 +213,6 @@ public class HiveRecordSink
         tableInspector = getStandardStructObjectInspector(dataColumnNames, getJavaObjectInspectors(hiveTypes));
         structFields = ImmutableList.copyOf(tableInspector.getAllStructFieldRefs());
         row = tableInspector.create();
-
-        columnTypes = ImmutableList.copyOf(columnTypes);
     }
 
     private RecordWriter createNonPartitionedRecordReader()

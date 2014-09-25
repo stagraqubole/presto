@@ -80,7 +80,7 @@ public class HiveClientConfig
 
     private List<String> resourceConfigFiles;
 
-    private boolean insertS3TempEnabled = false;
+    private boolean insertS3TempEnabled = true;
 
     public int getMaxInitialSplits()
     {
