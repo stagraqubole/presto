@@ -1303,7 +1303,7 @@ public class HiveClient
     @Override
     public boolean canHandle(ConnectorInsertTableHandle tableHandle)
     {
-        return false;
+        return (tableHandle instanceof HiveInsertTableHandle) && ((HiveInsertTableHandle) tableHandle).getClientId().equals(connectorId);
     }
 
     @Override
