@@ -867,6 +867,10 @@ public class HiveClient
         }
 
         checkNotNull(table, "Table %s does not exist", tableSchemaName.getTableName());
+        if (table.getSd().getNumBuckets() > 0) {
+            throw new UnsupportedOperationException("Insert not supported with Bucketed Tables");
+        }
+
         String outputFormat = table.getSd().getOutputFormat();
         SerDeInfo serdeInfo = table.getSd().getSerdeInfo();
         String serdeLib = serdeInfo.getSerializationLib();

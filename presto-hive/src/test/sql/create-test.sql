@@ -232,10 +232,10 @@ COMMENT 'Presto Destination Table partitioned for Inserts'
 PARTITIONED BY (ds STRING, dummy INT)
 ;
 
-INSERT INTO TABLE presto_insert_destination SELECT CONCAT("Val", n), n from tmp_presto_test limit 2;
+INSERT INTO TABLE presto_insert_destination SELECT CONCAT("Val", (t_tinyint-1)), (t_tinyint-1) from tmp_presto_test limit 2;
 
-INSERT INTO TABLE presto_insert_destination_partitioned partition(ds="2014-03-12", dummy=1) SELECT CONCAT("P1_Val", n), n from tmp_presto_test limit 2;
-INSERT INTO TABLE presto_insert_destination_partitioned partition(ds="2014-03-12", dummy=2) SELECT CONCAT("P2_Val", n), 2 * n from tmp_presto_test limit 2;
+INSERT INTO TABLE presto_insert_destination_partitioned partition(ds="2014-03-12", dummy=1) SELECT CONCAT("P1_Val", (t_tinyint-1)), (t_tinyint-1) from tmp_presto_test limit 2;
+INSERT INTO TABLE presto_insert_destination_partitioned partition(ds="2014-03-12", dummy=2) SELECT CONCAT("P2_Val", (t_tinyint-1)), 2 * (t_tinyint-1) from tmp_presto_test limit 2;
 
 
 DROP TABLE tmp_presto_test;
