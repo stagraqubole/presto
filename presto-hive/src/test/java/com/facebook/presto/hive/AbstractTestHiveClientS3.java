@@ -28,6 +28,7 @@ import com.facebook.presto.spi.RecordSink;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.TupleDomain;
 import com.facebook.presto.type.TypeRegistry;
+import com.facebook.presto.spi.type.StandardTypes;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -44,7 +45,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
-import java.util.ArrayList;
 
 import static com.facebook.presto.hadoop.HadoopFileStatus.isDirectory;
 import static com.facebook.presto.hive.util.Types.checkType;
@@ -83,12 +83,9 @@ public abstract class AbstractTestHiveClientS3 extends AbstractTestHiveClient
 
         insertTableDestination = new SchemaTableName(database, "presto_insert_destination_s3");
         insertTablePartitionedDestination = new SchemaTableName(database, "presto_insert_destination_partitioned_s3");
-        insertCleanupSplits = new ArrayList<ConnectorSplit>();
-        insertedPartitions = new ArrayList<HivePartition>();
-        originalSplits = new ArrayList<String>();
 
-        dsColumn = new HiveColumnHandle(connectorId, "ds", 0, HiveType.STRING, -1, true);
-        dummyColumn = new HiveColumnHandle(connectorId, "dummy", 2, HiveType.INT, -1, true);
+        dsColumn = new HiveColumnHandle(connectorId, "ds", 0, HiveType.HIVE_STRING, StandardTypes.VARCHAR, -1, true);
+        dummyColumn = new HiveColumnHandle(connectorId, "dummy", 2, HiveType.HIVE_INT, StandardTypes.BIGINT, -1, true);
     }
 
     protected void setup(String host, int port, String databaseName, String awsAccessKey, String awsSecretKey, String writableBucket)

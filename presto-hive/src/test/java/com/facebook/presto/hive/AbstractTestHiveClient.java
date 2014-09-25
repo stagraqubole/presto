@@ -19,6 +19,7 @@ import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorColumnHandle;
 import com.facebook.presto.spi.ConnectorMetadata;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
+import com.facebook.presto.spi.ConnectorInsertTableHandle;
 import com.facebook.presto.spi.ConnectorPartition;
 import com.facebook.presto.spi.ConnectorPartitionResult;
 import com.facebook.presto.spi.ConnectorRecordSetProvider;
@@ -148,9 +149,30 @@ public abstract class AbstractTestHiveClient
 
     protected SchemaTableName insertTableDestination;
     protected SchemaTableName insertTablePartitionedDestination;
-    protected List<ConnectorSplit> insertCleanupSplits;
-    protected List<HivePartition> insertedPartitions;
-    protected List<String> originalSplits;
+    protected final ThreadLocal<List<ConnectorSplit>> insertCleanupSplits = new ThreadLocal<List<ConnectorSplit>>()
+            {
+                @Override
+                protected List<ConnectorSplit> initialValue()
+                {
+                    return new ArrayList<ConnectorSplit>();
+                }
+            };
+    protected final ThreadLocal<List<HivePartition>> insertedPartitions = new ThreadLocal<List<HivePartition>>()
+            {
+                @Override
+                protected List<HivePartition> initialValue()
+                {
+                    return new ArrayList<HivePartition>();
+                }
+            };
+    protected final ThreadLocal<List<String>> originalSplits = new ThreadLocal<List<String>>()
+            {
+                @Override
+                protected List<String> initialValue()
+                {
+                    return new ArrayList<String>();
+                }
+            };
 
     protected void setupHive(String connectorId, String databaseName, String timeZoneId)
     {
@@ -168,8 +190,6 @@ public abstract class AbstractTestHiveClient
 
         insertTableDestination = new SchemaTableName(database, "presto_insert_destination");
         insertTablePartitionedDestination = new SchemaTableName(database, "presto_insert_destination_partitioned");
-        insertCleanupSplits = new ArrayList<ConnectorSplit>();
-        insertedPartitions = new ArrayList<HivePartition>();
 
         temporaryCreateTable = new SchemaTableName(database, "tmp_presto_test_create_" + randomName());
         temporaryCreateSampledTable = new SchemaTableName(database, "tmp_presto_test_create_" + randomName());
@@ -263,6 +283,7 @@ public abstract class AbstractTestHiveClient
                 false,
                 true,
                 hiveClientConfig.getHiveStorageFormat(),
+                hiveClientConfig.getInsertS3TempEnabled(),
                 false,
                 new TypeRegistry());
 
@@ -1195,7 +1216,7 @@ public abstract class AbstractTestHiveClient
                 verifyInsertData(cursor, Arrays.asList(originalCol1Data), Arrays.asList(originalCol2Data));
             }
 
-            doInsertInto(insertTableDestination, insertedCol1Data, insertedCol2Data);
+            doInsertInto(insertedCol1Data, insertedCol2Data);
 
             // confirm old and new data exists
             tableHandle = getTableHandle(insertTableDestination);
@@ -1306,15 +1327,13 @@ public abstract class AbstractTestHiveClient
             Set<ConnectorPartition> partitions;
             partitions = ImmutableSet.<ConnectorPartition>of(
                     new HivePartition(insertTablePartitionedDestination,
-                            "ds=2014-03-12/dummy=1",
-                            ImmutableMap.<ConnectorColumnHandle, SerializableNativeValue>of(dsColumn,
-                                    new SerializableNativeValue(Slice.class, utf8Slice("2014-03-12")), dummyColumn, new SerializableNativeValue(Long.class, 1L)),
-                            Optional.<HiveBucket>absent()),
+                    "ds=2014-03-12/dummy=1",
+                    ImmutableMap.<ConnectorColumnHandle, Comparable<?>>of(dsColumn, utf8Slice("2014-03-12"), dummyColumn, 1L),
+                    Optional.<HiveBucket>absent()),
                     new HivePartition(insertTablePartitionedDestination,
-                            "ds=2014-03-12/dummy=2",
-                            ImmutableMap.<ConnectorColumnHandle, SerializableNativeValue>of(dsColumn,
-                                    new SerializableNativeValue(Slice.class, utf8Slice("2014-03-12")), dummyColumn, new SerializableNativeValue(Long.class, 2L)),
-                            Optional.<HiveBucket>absent()));
+                    "ds=2014-03-12/dummy=2",
+                    ImmutableMap.<ConnectorColumnHandle, Comparable<?>>of(dsColumn, utf8Slice("2014-03-12"), dummyColumn, 2L),
+                    Optional.<HiveBucket>absent()));
 
             this.assertExpectedPartitions(partitionResult.getPartitions(), partitions);
 
@@ -1335,9 +1354,9 @@ public abstract class AbstractTestHiveClient
 
             // insert into these 2 partitions, plus 1 new partition
             String[] col1 = { "P1_Val3", "P2_Val3", "P3_Val1", "P3_Val2" };
-            Integer[] col2 = { 3, 6, 8, 10 };
+            int[] col2 = { 3, 6, 8, 10 };
             String[] col3 = { "2014-03-12", "2014-03-12", "2014-03-13", "2014-03-13" };
-            Integer[] col4 = { 1, 2, 3, 3 };
+            int[] col4 = { 1, 2, 3, 3 };
 
             doPartitionedInsertInto(col1, col2, col3, col4);
 
@@ -1347,10 +1366,10 @@ public abstract class AbstractTestHiveClient
             assertEquals(partitionResult.getPartitions().size(), 3);
 
             HivePartition insertedPartition = new HivePartition(insertTablePartitionedDestination,
-                                                "ds=2014-03-13/dummy=3",
-                                                ImmutableMap.<ConnectorColumnHandle, SerializableNativeValue>of(dsColumn,
-                                                        new SerializableNativeValue(Slice.class, utf8Slice("2014-03-13")), dummyColumn, new SerializableNativeValue(Long.class, 3L)),
-                                                Optional.<HiveBucket>absent());
+                    "ds=2014-03-13/dummy=3",
+                    ImmutableMap.<ConnectorColumnHandle, Comparable<?>>of(dsColumn, utf8Slice("2014-03-13"), dummyColumn, 3L),
+                    Optional.<HiveBucket>absent());
+
             insertedPartitions.get().add(insertedPartition);
 
             partitions = ImmutableSet.<ConnectorPartition>builder()
@@ -1413,8 +1432,8 @@ public abstract class AbstractTestHiveClient
         ConnectorSplitSource splitSource = splitManager.getPartitionSplits(tableHandle, ImmutableList.<ConnectorPartition>of(partition));
         for (ConnectorSplit split : getAllSplits(splitSource)) {
             String key = partition.getPartitionId();
-            if (!originalSplits.contains(split.getInfo().toString())) {
-                insertCleanupSplits.add(split);
+            if (!originalSplits.get().contains(split.getInfo().toString())) {
+                insertCleanupSplits.get().add(split);
                 key = key + "_new";
             }
             RecordCursor cursor = recordSetProvider.getRecordSet(split, columnHandles).cursor();
