@@ -1255,7 +1255,7 @@ public abstract class AbstractTestHiveClient
             ConnectorSplit originalSplit = getOnlyElement(getAllSplits(splitSource));
             originalSplits.get().clear();
             originalSplits.get().add(originalSplit.getInfo().toString());
-            
+
             try (ConnectorPageSource pageSource = pageSourceProvider.createPageSource(originalSplit, columnHandles)) {
                 verifyInsertData(materializeSourceDataStream(SESSION, pageSource, getTypes(columnHandles)), Arrays.asList(originalCol1Data), Arrays.asList(originalCol2Data));
             }
@@ -1282,7 +1282,7 @@ public abstract class AbstractTestHiveClient
                     col2Data = Arrays.asList(insertedCol2Data);
                     insertCleanupSplits.get().add(split);
                 }
-                
+
                 try (ConnectorPageSource pageSource = pageSourceProvider.createPageSource(split, columnHandles)) {
                     verifyInsertData(materializeSourceDataStream(SESSION, pageSource, getTypes(columnHandles)), col1Data, col2Data);
                 }
