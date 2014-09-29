@@ -30,6 +30,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Ordering;
 import com.google.inject.Injector;
 import io.airlift.configuration.ConfigurationFactory;
 import io.airlift.http.server.HttpServerInfo;
@@ -39,6 +41,7 @@ import io.airlift.resolver.ArtifactResolver;
 import io.airlift.resolver.DefaultArtifact;
 import org.sonatype.aether.artifact.Artifact;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 import javax.inject.Inject;
 
@@ -47,6 +50,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
@@ -170,7 +174,12 @@ public class PluginManager
         ServiceLoader<Plugin> serviceLoader = ServiceLoader.load(Plugin.class, pluginClassLoader);
         List<Plugin> plugins = ImmutableList.copyOf(serviceLoader);
 
+        if (plugins.isEmpty()) {
+            log.warn("No service providers of type %s", Plugin.class.getName());
+        }
+
         for (Plugin plugin : plugins) {
+            log.info("Installing %s", plugin.getClass().getName());
             installPlugin(plugin);
         }
     }
@@ -182,22 +191,27 @@ public class PluginManager
         plugin.setOptionalConfig(optionalConfig);
 
         for (BlockEncodingFactory<?> blockEncodingFactory : plugin.getServices(BlockEncodingFactory.class)) {
+            log.info("Registering block encoding %s", blockEncodingFactory.getName());
             blockEncodingManager.addBlockEncodingFactory(blockEncodingFactory);
         }
 
         for (Type type : plugin.getServices(Type.class)) {
+            log.info("Registering type %s", type.getName());
             typeRegistry.addType(type);
         }
 
         for (ConnectorFactory connectorFactory : plugin.getServices(ConnectorFactory.class)) {
+            log.info("Registering connector %s", connectorFactory.getName());
             connectorManager.addConnectorFactory(connectorFactory);
         }
 
         for (SystemTable systemTable : plugin.getServices(SystemTable.class)) {
+            log.info("Registering system table %s", systemTable.getTableMetadata().getTable());
             systemTablesManager.addTable(systemTable);
         }
 
         for (FunctionFactory functionFactory : plugin.getServices(FunctionFactory.class)) {
+            log.info("Registering functions from %s", functionFactory.getClass().getName());
             metadata.addFunctions(functionFactory.listFunctions());
         }
     }
@@ -222,11 +236,11 @@ public class PluginManager
 
         log.debug("Classpath for %s:", pomFile);
         List<URL> urls = new ArrayList<>();
-        urls.add(new File(pomFile.getParentFile(), "target/classes/").toURI().toURL());
-        for (Artifact artifact : artifacts) {
+        for (Artifact artifact : sortedArtifacts(artifacts)) {
             if (artifact.getFile() != null) {
-                log.debug("    %s", artifact.getFile());
-                urls.add(artifact.getFile().toURI().toURL());
+                File file = artifact.getFile().getCanonicalFile();
+                log.debug("    %s", file);
+                urls.add(file.toURI().toURL());
             }
             else {
                 log.debug("  Could not resolve artifact %s", artifact);
@@ -283,6 +297,26 @@ public class PluginManager
             }
         }
         return ImmutableList.of();
+    }
+
+    private static List<Artifact> sortedArtifacts(List<Artifact> artifacts)
+    {
+        List<Artifact> list = Lists.newArrayList(artifacts);
+        Collections.sort(list, Ordering.natural().onResultOf(artifactFileGetter()));
+        return list;
+    }
+
+    private static Function<Artifact, Comparable<File>> artifactFileGetter()
+    {
+        return new Function<Artifact, Comparable<File>>()
+        {
+            @Nullable
+            @Override
+            public Comparable<File> apply(Artifact input)
+            {
+                return input.getFile();
+            }
+        };
     }
 
     private static class SimpleChildFirstClassLoader

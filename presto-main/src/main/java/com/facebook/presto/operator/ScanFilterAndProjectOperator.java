@@ -201,12 +201,23 @@ public class ScanFilterAndProjectOperator
             else {
                 if (currentPage == null) {
                     currentPage = pageSource.getNextPage();
+
+                    if (currentPage != null) {
+                        // update operator stats
+                        long endCompletedBytes = pageSource.getCompletedBytes();
+                        long endReadTimeNanos = pageSource.getReadTimeNanos();
+                        operatorContext.recordGeneratedInput(endCompletedBytes - completedBytes, currentPage.getPositionCount(), endReadTimeNanos - readTimeNanos);
+                        completedBytes = endCompletedBytes;
+                        readTimeNanos = endReadTimeNanos;
+                    }
+
                     currentPosition = 0;
                 }
 
                 if (currentPage != null) {
                     currentPosition = pageProcessor.process(operatorContext.getSession(), currentPage, currentPosition, currentPage.getPositionCount(), pageBuilder);
                     if (currentPosition == currentPage.getPositionCount()) {
+                        currentPage.release();
                         currentPage = null;
                         currentPosition = 0;
                     }

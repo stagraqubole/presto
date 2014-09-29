@@ -20,6 +20,7 @@ import org.apache.hadoop.hive.metastore.api.Table;
 import org.weakref.jmx.Managed;
 
 import java.util.List;
+import java.util.Map;
 
 public interface HiveMetastore
 {
@@ -55,7 +56,7 @@ public interface HiveMetastore
     List<String> getPartitionNamesByParts(String databaseName, String tableName, List<String> parts)
             throws NoSuchObjectException;
 
-    List<Partition> getPartitionsByNames(String databaseName, String tableName, List<String> partitionNames)
+    Map<String, Partition> getPartitionsByNames(String databaseName, String tableName, List<String> partitionNames)
             throws NoSuchObjectException;
 
     Table getTable(String databaseName, String tableName)
