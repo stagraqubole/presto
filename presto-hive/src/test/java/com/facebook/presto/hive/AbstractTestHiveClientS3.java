@@ -136,13 +136,6 @@ public abstract class AbstractTestHiveClientS3
 
         hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, hiveClientConfig);
         metastoreClient = new TestingHiveMetastore(hiveCluster, executor, hiveClientConfig, writableBucket);
-        metadata = new HiveMetadata(
-                connectorId,
-                hiveClientConfig,
-                metastoreClient,
-                hdfsEnvironment,
-                newDirectExecutorService(),
-                new TypeRegistry());
         splitManager = new HiveSplitManager(
                 connectorId,
                 hiveClientConfig,
@@ -151,6 +144,14 @@ public abstract class AbstractTestHiveClientS3
                 hdfsEnvironment,
                 new HadoopDirectoryLister(),
                 executor);
+        metadata = new HiveMetadata(
+                connectorId,
+                hiveClientConfig,
+                metastoreClient,
+                hdfsEnvironment,
+                newDirectExecutorService(),
+                new TypeRegistry(),
+                splitManager);
         recordSinkProvider = new HiveRecordSinkProvider(hdfsEnvironment);
         pageSourceProvider = new HivePageSourceProvider(hiveClientConfig, hdfsEnvironment, DEFAULT_HIVE_RECORD_CURSOR_PROVIDER, DEFAULT_HIVE_DATA_STREAM_FACTORIES, TYPE_MANAGER);
     }
