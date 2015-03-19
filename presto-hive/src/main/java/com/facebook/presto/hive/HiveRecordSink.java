@@ -196,8 +196,9 @@ public class HiveRecordSink
             serializer = (Serializer) lookupDeserializer(serdeLib);
             Class<?> clazz = Class.forName(outputFormat);
             outputFormatClass = clazz.asSubclass(HiveOutputFormat.class);
+            serializer.initialize(conf, properties);
         }
-        catch (ClassNotFoundException | ClassCastException e) {
+        catch (ClassNotFoundException | ClassCastException | SerDeException e) {
             throw Throwables.propagate(e);
         }
 
@@ -247,6 +248,7 @@ public class HiveRecordSink
         if (!filesWritten.containsKey(partitionId)) {
             filesWritten.put(partitionId, new ArrayList<String>());
         }
+        filesWritten.get(partitionId).add(fileName);
 
         return createRecordWriter(filePath, conf, properties, outputFormatClass.getName());
     }
