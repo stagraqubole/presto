@@ -51,6 +51,11 @@ public class HiveRecordSinkProvider
     @Override
     public RecordSink getRecordSink(ConnectorInsertTableHandle tableHandle)
     {
-        throw new UnsupportedOperationException();
+        HiveInsertTableHandle handle = checkType(tableHandle, HiveInsertTableHandle.class, "tableHandle");
+
+        Path target = new Path(handle.getTemporaryPath());
+        JobConf conf = new JobConf(hdfsEnvironment.getConfiguration(target));
+
+        return new HiveRecordSink(handle, target, conf);
     }
 }
