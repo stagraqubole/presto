@@ -222,7 +222,7 @@ public class HiveRecordSink
             createNonPartitionedRecordReader();
         }
 
-        tableInspector = getStandardStructObjectInspector(dataColumnNames, getJavaObjectInspectors(columnTypes));
+        tableInspector = getStandardStructObjectInspector(dataColumnNames, getJavaObjectInspectors(dataColumnTypes));
         structFields = ImmutableList.copyOf(tableInspector.getAllStructFieldRefs());
         row = tableInspector.create();
     }
