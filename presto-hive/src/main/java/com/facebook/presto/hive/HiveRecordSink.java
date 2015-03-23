@@ -17,6 +17,7 @@ import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.RecordSink;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
+import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
 import com.facebook.presto.spi.type.BigintType;
 import com.facebook.presto.spi.type.BooleanType;
 import com.facebook.presto.spi.type.DateType;
@@ -116,6 +117,8 @@ public class HiveRecordSink
     private LoadingCache<String, RecordWriter> recordWriters;
     private final Properties properties;
 
+    private final ClassLoader classLoader;
+
     public HiveRecordSink(HiveInsertTableHandle handle, Path target, JobConf conf)
     {
         this(target,
@@ -213,7 +216,9 @@ public class HiveRecordSink
                                 @Override
                                 public RecordWriter load(String path)
                                 {
-                                    return getRecordWriter(path);
+                                    try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
+                                        return getRecordWriter(path);
+                                    }
                                 }
                             });
             recordWriter = null;
@@ -221,6 +226,8 @@ public class HiveRecordSink
         else {
             createNonPartitionedRecordReader();
         }
+
+        this.classLoader = Thread.currentThread().getContextClassLoader();
 
         tableInspector = getStandardStructObjectInspector(dataColumnNames, getJavaObjectInspectors(dataColumnTypes));
         structFields = ImmutableList.copyOf(tableInspector.getAllStructFieldRefs());
