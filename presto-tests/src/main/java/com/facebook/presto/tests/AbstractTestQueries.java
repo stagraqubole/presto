@@ -843,16 +843,31 @@ public abstract class AbstractTestQueries
     {
         assertQuery("SELECT custkey, orderstatus, COUNT(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
         assertQuery("SELECT custkey, orderstatus, COUNT(DISTINCT orderkey), SUM(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
+        assertQuery("SELECT custkey, orderstatus, COUNT(orderkey), SUM(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
         assertQuery("" +
-                "SELECT custkey, COUNT(DISTINCT orderstatus) FROM (" +
-                "   SELECT orders.custkey AS custkey, orders.orderstatus AS orderstatus " +
+                "SELECT custkey, SUM(orderkey), COUNT(DISTINCT orderstatus) FROM (" +
+                "   SELECT orders.custkey AS custkey, orders.orderstatus AS orderstatus, orders.orderkey AS orderkey " +
                 "   FROM lineitem JOIN orders ON lineitem.orderkey = orders.orderkey AND orders.orderkey = lineitem.partkey " +
                 "   GROUP BY orders.custkey, orders.orderstatus" +
                 ") " +
                 "GROUP BY custkey");
-        assertQuery("SELECT custkey, COUNT(DISTINCT orderkey), COUNT(DISTINCT orderstatus) FROM orders GROUP BY custkey");
+        assertQuery("SELECT MAX(custkey), SUM(DISTINCT x) FROM (SELECT custkey, COUNT(DISTINCT orderstatus) x FROM orders GROUP BY custkey) t");
+    }
 
-        assertQuery("SELECT SUM(DISTINCT x) FROM (SELECT custkey, COUNT(DISTINCT orderstatus) x FROM orders GROUP BY custkey) t");
+    @Test
+    public void testDistinctOptimizer()
+            throws Exception
+    {
+        assertQuery("SELECT custkey, sum(orderstatus), COUNT(DISTINCT orderkey) FROM orders GROUP BY custkey");
+        assertQuery("SELECT custkey, orderstatus, COUNT(DISTINCT orderkey), SUM(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
+        assertQuery("" +
+                "SELECT custkey, max(orderkey), COUNT(DISTINCT orderstatus) FROM (" +
+                "   SELECT orders.custkey AS custkey, orders.orderstatus AS orderstatus, orders.orderkey as orderkey " +
+                "   FROM lineitem JOIN orders ON lineitem.orderkey = orders.orderkey AND orders.orderkey = lineitem.partkey " +
+                "   GROUP BY orders.custkey, orders.orderstatus" +
+                ") " +
+                "GROUP BY custkey");
+        assertQuery("SELECT sum(custkey), COUNT(orderkey), sum(DISTINCT orderkey) FROM orders GROUP BY custkey");
     }
 
     @Test

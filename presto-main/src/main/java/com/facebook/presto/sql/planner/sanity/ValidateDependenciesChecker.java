@@ -26,6 +26,7 @@ import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExceptNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
+import com.facebook.presto.sql.planner.plan.ExpandNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -251,6 +252,25 @@ public final class ValidateDependenciesChecker
             for (Expression expression : node.getAssignments().values()) {
                 Set<Symbol> dependencies = DependencyExtractor.extractUnique(expression);
                 checkDependencies(inputs, dependencies, "Invalid node. Expression dependencies (%s) not in source plan output (%s)", dependencies, inputs);
+            }
+
+            return null;
+        }
+
+        @Override
+        public Void visitExpand(ExpandNode node, Void context)
+        {
+            PlanNode source = node.getSource();
+            source.accept(this, context); // visit child
+
+            verifyUniqueId(node);
+
+            Set<Symbol> inputs = ImmutableSet.copyOf(source.getOutputSymbols());
+            for (Map<Symbol, Expression> aggregations : node.getAssignmentsList()) {
+                for (Expression expression : aggregations.values()) {
+                    Set<Symbol> dependencies = DependencyExtractor.extractUnique(expression);
+                   // checkDependencies(inputs, dependencies, "Invalid node. Expression dependencies (%s) not in source plan output (%s)", dependencies, inputs);
+                }
             }
 
             return null;

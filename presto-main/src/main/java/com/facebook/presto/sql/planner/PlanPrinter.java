@@ -41,6 +41,7 @@ import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExceptNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode.Scope;
+import com.facebook.presto.sql.planner.plan.ExpandNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -700,6 +701,20 @@ public class PlanPrinter
                 print(indent + 2, "%s := %s", entry.getKey(), entry.getValue());
             }
 
+            return processChildren(node, indent + 1);
+        }
+
+        @Override
+        public Void visitExpand(ExpandNode node, Integer indent)
+        {
+            print(indent, "- Expand => [%s]", formatOutputs(node.getOutputSymbols()));
+            int projection = 1;
+            for (Map<Symbol, Expression> assignments : node.getAssignmentsList()) {
+                print(indent + 1, "Projection: %d", projection++);
+                for (Map.Entry<Symbol, Expression> entry : assignments.entrySet()) {
+                    print(indent + 2, "%s := %s", entry.getKey(), entry.getValue());
+                }
+            }
             return processChildren(node, indent + 1);
         }
 

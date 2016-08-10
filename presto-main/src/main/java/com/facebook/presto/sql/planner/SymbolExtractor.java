@@ -19,6 +19,7 @@ import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
+import com.facebook.presto.sql.planner.plan.ExpandNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -172,6 +173,17 @@ public final class SymbolExtractor
 
         @Override
         public Void visitProject(ProjectNode node, Void context)
+        {
+            // visit child
+            node.getSource().accept(this, context);
+
+            builder.addAll(node.getOutputSymbols());
+
+            return null;
+        }
+
+        @Override
+        public Void visitExpand(ExpandNode node, Void context)
         {
             // visit child
             node.getSource().accept(this, context);

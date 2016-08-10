@@ -50,10 +50,13 @@ import com.google.common.primitives.Primitives;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.IntStream;
 
@@ -98,31 +101,41 @@ public class PageProcessorCompiler
     }
 
     @Override
-    public void generateMethods(ClassDefinition classDefinition, CallSiteBinder callSiteBinder, RowExpression filter, List<RowExpression> projections)
+    public void generateMethods(ClassDefinition classDefinition, CallSiteBinder callSiteBinder, RowExpression filter, List<List<RowExpression>> projectionsList)
     {
+        List<RowExpression> projections = projectionsList.get(0);
         CachedInstanceBinder cachedInstanceBinder = new CachedInstanceBinder(classDefinition, callSiteBinder);
-        ImmutableList.Builder<MethodDefinition> projectMethods = ImmutableList.builder();
-        ImmutableList.Builder<MethodDefinition> projectColumnarMethods = ImmutableList.builder();
-        ImmutableList.Builder<MethodDefinition> projectDictionaryMethods = ImmutableList.builder();
-        for (int i = 0; i < projections.size(); i++) {
-            MethodDefinition project = generateProjectMethod(classDefinition, callSiteBinder, cachedInstanceBinder, "project_" + i, projections.get(i));
-            MethodDefinition projectColumnar = generateProjectColumnarMethod(classDefinition, callSiteBinder, "projectColumnar_" + i, projections.get(i), project);
-            MethodDefinition projectRLE = generateProjectRLEMethod(classDefinition, "projectRLE_" + i, projections.get(i), project, projectColumnar);
-            MethodDefinition projectDictionary = generateProjectDictionaryMethod(classDefinition, "projectDictionary_" + i, projections.get(i), project, projectColumnar, projectRLE);
+        ImmutableList.Builder<List<MethodDefinition>> projectMethodsList = ImmutableList.builder();
+        ImmutableList.Builder<List<MethodDefinition>> projectColumnarMethodsList = ImmutableList.builder();
+        ImmutableList.Builder<List<MethodDefinition>> projectDictionaryMethodsList = ImmutableList.builder();
+        for (int i = 0; i < projectionsList.size(); i++) {
+            ImmutableList.Builder<MethodDefinition> projectMethods = ImmutableList.builder();
+            ImmutableList.Builder<MethodDefinition> projectColumnarMethods = ImmutableList.builder();
+            ImmutableList.Builder<MethodDefinition> projectDictionaryMethods = ImmutableList.builder();
+            for (int j = 0; j < projections.size(); j++) {
+                // TODO stagra: extend for other project methods too
+                MethodDefinition project = generateProjectMethod(classDefinition, callSiteBinder, cachedInstanceBinder, "project_" + i + j, projectionsList.get(i).get(j));
+                MethodDefinition projectColumnar = generateProjectColumnarMethod(classDefinition, callSiteBinder, "projectColumnar_" + i + j, projectionsList.get(i).get(j), project);
+                MethodDefinition projectRLE = generateProjectRLEMethod(classDefinition, "projectRLE_" + i + j, projectionsList.get(i).get(j), project, projectColumnar);
+                MethodDefinition projectDictionary = generateProjectDictionaryMethod(classDefinition, "projectDictionary_" + i + j, projectionsList.get(i).get(j), project, projectColumnar, projectRLE);
 
-            projectMethods.add(project);
-            projectColumnarMethods.add(projectColumnar);
-            projectDictionaryMethods.add(projectDictionary);
+                projectMethods.add(project);
+                projectColumnarMethods.add(projectColumnar);
+                projectDictionaryMethods.add(projectDictionary);
+            }
+            projectMethodsList.add(projectMethods.build());
+            projectColumnarMethodsList.add(projectColumnarMethods.build());
+            projectDictionaryMethodsList.add(projectDictionaryMethods.build());
         }
 
-        List<MethodDefinition> projectMethodDefinitions = projectMethods.build();
-        List<MethodDefinition> projectColumnarMethodDefinitions = projectColumnarMethods.build();
-        List<MethodDefinition> projectDictionaryMethodDefinitions = projectDictionaryMethods.build();
+        List<List<MethodDefinition>> projectMethodDefinitions = projectMethodsList.build();
+        List<List<MethodDefinition>> projectColumnarMethodDefinitions = projectColumnarMethodsList.build();
+        List<List<MethodDefinition>> projectDictionaryMethodDefinitions = projectDictionaryMethodsList.build();
 
-        generateProcessMethod(classDefinition, filter, projections, projectMethodDefinitions);
+        generateProcessMethod(classDefinition, filter, projectionsList, projectMethodDefinitions);
         generateGetNonLazyPageMethod(classDefinition, filter, projections);
-        generateProcessColumnarMethod(classDefinition, projections, projectColumnarMethodDefinitions);
-        generateProcessColumnarDictionaryMethod(classDefinition, projections, projectDictionaryMethodDefinitions);
+        generateProcessColumnarMethod(classDefinition, projections, projectColumnarMethodDefinitions.get(0)); // TODO stagra: fix this
+        generateProcessColumnarDictionaryMethod(classDefinition, projections, projectDictionaryMethodDefinitions.get(0)); // TODO stagra: fix this
 
         generateFilterPageMethod(classDefinition, filter);
         generateFilterMethod(classDefinition, callSiteBinder, cachedInstanceBinder, filter);
@@ -155,7 +168,7 @@ public class PageProcessorCompiler
         body.ret();
     }
 
-    private static void generateProcessMethod(ClassDefinition classDefinition, RowExpression filter, List<RowExpression> projections, List<MethodDefinition> projectionMethods)
+    private static void generateProcessMethod(ClassDefinition classDefinition, RowExpression filter, List<List<RowExpression>> projectionsList, List<List<MethodDefinition>> projectionMethods)
     {
         Parameter session = arg("session", ConnectorSession.class);
         Parameter page = arg("page", Page.class);
@@ -169,24 +182,32 @@ public class PageProcessorCompiler
         Variable thisVariable = method.getThis();
 
         // extract blocks
-        List<Integer> allInputChannels = getInputChannels(concat(projections, ImmutableList.of(filter)));
+        Set<Integer> allInputChannels = new HashSet<>();
+        for (List<RowExpression> projections : projectionsList) {
+            allInputChannels.addAll(getInputChannels(concat(projections, ImmutableList.of(filter))));
+        }
         ImmutableMap.Builder<Integer, Variable> builder = ImmutableMap.builder();
         for (int channel : allInputChannels) {
             Variable blockVariable = scope.declareVariable("block_" + channel, body, page.invoke("getBlock", Block.class, constantInt(channel)));
             builder.put(channel, blockVariable);
         }
         Map<Integer, Variable> channelBlocks = builder.build();
-        Map<RowExpression, List<Variable>> expressionInputBlocks = getExpressionInputBlocks(projections, filter, channelBlocks);
+        List<Map<RowExpression, List<Variable>>> expressionInputBlocksList = new ArrayList<>();
+        for (List<RowExpression> projections : projectionsList) {
+            expressionInputBlocksList.add(getExpressionInputBlocks(projections, filter, channelBlocks));
+        }
 
         // projection body
         Variable position = scope.declareVariable(int.class, "position");
 
-        BytecodeBlock project = new BytecodeBlock()
-                .append(pageBuilder.invoke("declarePosition", void.class));
+        BytecodeBlock project = new BytecodeBlock();
 
-        for (int projectionIndex = 0; projectionIndex < projections.size(); projectionIndex++) {
-            RowExpression projection = projections.get(projectionIndex);
-            project.append(invokeProject(thisVariable, session, expressionInputBlocks.get(projection), position, pageBuilder, constantInt(projectionIndex), projectionMethods.get(projectionIndex)));
+        for (int projectionNumber = 0; projectionNumber < projectionsList.size(); projectionNumber++) {
+            project.append(pageBuilder.invoke("declarePosition", void.class));
+            for (int projectionIndex = 0; projectionIndex < projectionsList.get(projectionNumber).size(); projectionIndex++) {
+                RowExpression projection = projectionsList.get(projectionNumber).get(projectionIndex);
+                project.append(invokeProject(thisVariable, session, expressionInputBlocksList.get(projectionNumber).get(projection), position, pageBuilder, constantInt(projectionIndex), projectionMethods.get(projectionNumber).get(projectionIndex)));
+            }
         }
         LabelNode done = new LabelNode("done");
 
@@ -200,7 +221,7 @@ public class PageProcessorCompiler
                                 .condition(pageBuilder.invoke("isFull", boolean.class))
                                 .ifTrue(jump(done)))
                         .append(new IfStatement()
-                                .condition(invokeFilter(thisVariable, session, expressionInputBlocks.get(filter), position))
+                                .condition(invokeFilter(thisVariable, session, expressionInputBlocksList.get(0).get(filter), position))
                                 .ifTrue(project)));
 
         body

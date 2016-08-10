@@ -27,6 +27,7 @@ import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.ExceptNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
+import com.facebook.presto.sql.planner.plan.ExpandNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -490,6 +491,27 @@ public class PruneUnreferencedOutputs
             PlanNode source = context.rewrite(node.getSource(), expectedInputs.build());
 
             return new ProjectNode(node.getId(), source, builder.build());
+        }
+
+        @Override
+        public PlanNode visitExpand(ExpandNode node, RewriteContext<Set<Symbol>> context)
+        {
+            ImmutableSet.Builder<Symbol> expectedInputs = ImmutableSet.builder();
+
+            for (int i = 0; i < node.getAssignmentsList().size(); i++) {
+                for (int j = 0; j < node.getAssignmentsList().get(i).size(); j++) {
+                    Symbol output = node.getOutputSymbols().get(j);
+                    Expression expression = node.getAssignmentsList().get(i).get(output);
+
+                    if (context.get().contains(output)) {
+                        expectedInputs.addAll(DependencyExtractor.extractUnique(expression));
+                    }
+                }
+            }
+
+            PlanNode source = context.rewrite(node.getSource(), expectedInputs.build());
+
+            return new ExpandNode(node.getId(), source, node.getAssignmentsList());
         }
 
         @Override

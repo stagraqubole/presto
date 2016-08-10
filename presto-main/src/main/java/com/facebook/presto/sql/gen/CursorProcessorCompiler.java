@@ -63,14 +63,16 @@ public class CursorProcessorCompiler
     }
 
     @Override
-    public void generateMethods(ClassDefinition classDefinition, CallSiteBinder callSiteBinder, RowExpression filter, List<RowExpression> projections)
+    public void generateMethods(ClassDefinition classDefinition, CallSiteBinder callSiteBinder, RowExpression filter, List<List<RowExpression>> projections)
     {
         CachedInstanceBinder cachedInstanceBinder = new CachedInstanceBinder(classDefinition, callSiteBinder);
-        generateProcessMethod(classDefinition, projections.size());
+        generateProcessMethod(classDefinition, projections.size(), projections.get(0).size());
         generateFilterMethod(classDefinition, callSiteBinder, cachedInstanceBinder, filter);
 
         for (int i = 0; i < projections.size(); i++) {
-            generateProjectMethod(classDefinition, callSiteBinder, cachedInstanceBinder, "project_" + i, projections.get(i));
+            for (int j = 0; j < projections.get(i).size(); j++) {
+                generateProjectMethod(classDefinition, callSiteBinder, cachedInstanceBinder, "project_" + i + j, projections.get(i).get(j));
+            }
         }
 
         MethodDefinition constructorDefinition = classDefinition.declareConstructor(a(PUBLIC));
@@ -83,7 +85,7 @@ public class CursorProcessorCompiler
         constructorBody.ret();
     }
 
-    private void generateProcessMethod(ClassDefinition classDefinition, int projections)
+    private void generateProcessMethod(ClassDefinition classDefinition, int numLists, int projections)
     {
         Parameter session = arg("session", ConnectorSession.class);
         Parameter cursor = arg("cursor", RecordCursor.class);
@@ -112,7 +114,7 @@ public class CursorProcessorCompiler
                 )
                 .update(new BytecodeBlock()
                                 .comment("completedPositions++")
-                                .incrementVariable(completedPositionsVariable, (byte) 1)
+                                .incrementVariable(completedPositionsVariable, (byte) numLists) // stagra we add numList rows to output in one iteration
                 );
 
         BytecodeBlock forLoopBody = new BytecodeBlock()
@@ -143,26 +145,29 @@ public class CursorProcessorCompiler
                 .invokeVirtual(PageBuilder.class, "declarePosition", void.class);
 
         // this.project_43(session, cursor, pageBuilder.getBlockBuilder(42)));
+        // stagra: finish projections of one col together for cache locality
         for (int projectionIndex = 0; projectionIndex < projections; projectionIndex++) {
-            ifStatement.ifTrue()
-                    .append(method.getThis())
-                    .getVariable(session)
-                    .getVariable(cursor);
+            for (int listIndex = 0; listIndex < numLists; listIndex++) {
+                ifStatement.ifTrue()
+                        .append(method.getThis())
+                        .getVariable(session)
+                        .getVariable(cursor);
 
-            // pageBuilder.getBlockBuilder(0)
-            ifStatement.ifTrue()
-                    .getVariable(pageBuilder)
-                    .push(projectionIndex)
-                    .invokeVirtual(PageBuilder.class, "getBlockBuilder", BlockBuilder.class, int.class);
+                // pageBuilder.getBlockBuilder(0)
+                ifStatement.ifTrue()
+                        .getVariable(pageBuilder)
+                        .push(projectionIndex)
+                        .invokeVirtual(PageBuilder.class, "getBlockBuilder", BlockBuilder.class, int.class);
 
-            // project(block..., blockBuilder)gen
-            ifStatement.ifTrue()
-                    .invokeVirtual(classDefinition.getType(),
-                    "project_" + projectionIndex,
-                    type(void.class),
-                    type(ConnectorSession.class),
-                    type(RecordCursor.class),
-                    type(BlockBuilder.class));
+                // project(block..., blockBuilder)gen
+                ifStatement.ifTrue()
+                        .invokeVirtual(classDefinition.getType(),
+                                "project_" + listIndex + projectionIndex,
+                                type(void.class),
+                                type(ConnectorSession.class),
+                                type(RecordCursor.class),
+                                type(BlockBuilder.class));
+            }
         }
         forLoopBody.append(ifStatement);
 

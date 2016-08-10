@@ -20,5 +20,5 @@ import java.util.List;
 
 public interface BodyCompiler<T>
 {
-    void generateMethods(ClassDefinition classDefinition, CallSiteBinder callSiteBinder, RowExpression filter, List<RowExpression> projections);
+    void generateMethods(ClassDefinition classDefinition, CallSiteBinder callSiteBinder, RowExpression filter, List<List<RowExpression>> projections);
 }

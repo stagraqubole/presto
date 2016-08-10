@@ -43,6 +43,7 @@ import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
+import com.facebook.presto.sql.planner.plan.ExpandNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -225,6 +226,18 @@ public class AddExchanges
         public PlanWithProperties visitProject(ProjectNode node, Context context)
         {
             Map<Symbol, Symbol> identities = computeIdentityTranslations(node.getAssignments());
+            PreferredProperties translatedPreferred = context.getPreferredProperties().translate(symbol -> Optional.ofNullable(identities.get(symbol)));
+
+            return rebaseAndDeriveProperties(node, planChild(node, context.withPreferredProperties(translatedPreferred)));
+        }
+
+        @Override
+        public PlanWithProperties visitExpand(ExpandNode node, Context context)
+        {
+            Map<Symbol, Symbol> identities = new HashMap();
+            for (Map<Symbol, Expression> assignment : node.getAssignmentsList()) {
+                identities.putAll(computeIdentityTranslations(assignment));
+            }
             PreferredProperties translatedPreferred = context.getPreferredProperties().translate(symbol -> Optional.ofNullable(identities.get(symbol)));
 
             return rebaseAndDeriveProperties(node, planChild(node, context.withPreferredProperties(translatedPreferred)));

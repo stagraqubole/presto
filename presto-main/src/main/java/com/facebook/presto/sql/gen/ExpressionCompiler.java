@@ -81,7 +81,7 @@ public class ExpressionCompiler
         return pageProcessors.size();
     }
 
-    public Supplier<CursorProcessor> compileCursorProcessor(RowExpression filter, List<RowExpression> projections, Object uniqueKey)
+    public CursorProcessor compileCursorProcessor(RowExpression filter, List<List<RowExpression>> projections, Object uniqueKey)
     {
         Class<? extends CursorProcessor> cursorProcessor = cursorProcessors.getUnchecked(new CacheKey(filter, projections, uniqueKey));
         return () -> {

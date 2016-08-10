@@ -103,6 +103,7 @@ import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
+import com.facebook.presto.sql.planner.plan.ExpandNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -140,6 +141,7 @@ import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.ExpressionTreeRewriter;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.SymbolReference;
+import com.facebook.presto.type.UnknownType;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -185,6 +187,7 @@ import static com.facebook.presto.operator.TableWriterOperator.TableWriterOperat
 import static com.facebook.presto.operator.UnnestOperator.UnnestOperatorFactory;
 import static com.facebook.presto.operator.WindowFunctionDefinition.window;
 import static com.facebook.presto.spi.StandardErrorCode.COMPILER_ERROR;
+import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.TypeUtils.writeNativeValue;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypes;
@@ -910,7 +913,7 @@ public class LocalExecutionPlanner
             Map<Symbol, Expression> projectionExpressions = outputSymbols.stream()
                     .collect(Collectors.toMap(x -> x, Symbol::toSymbolReference));
 
-            return visitScanFilterAndProject(context, node.getId(), sourceNode, filterExpression, projectionExpressions, outputSymbols);
+            return visitScanFilterAndProject(context, node.getId(), sourceNode, filterExpression, ImmutableList.of(projectionExpressions), outputSymbols);
         }
 
         @Override
@@ -930,7 +933,27 @@ public class LocalExecutionPlanner
 
             List<Symbol> outputSymbols = node.getOutputSymbols();
 
-            return visitScanFilterAndProject(context, node.getId(), sourceNode, filterExpression, node.getAssignments(), outputSymbols);
+            return visitScanFilterAndProject(context, node.getId(), sourceNode, filterExpression, ImmutableList.of(node.getAssignments()), outputSymbols);
+        }
+
+        @Override
+        public PhysicalOperation visitExpand(ExpandNode node, LocalExecutionPlanContext context)
+        {
+            PlanNode sourceNode;
+            Expression filterExpression;
+            if (node.getSource() instanceof FilterNode) {
+                FilterNode filterNode = (FilterNode) node.getSource();
+                sourceNode = filterNode.getSource();
+                filterExpression = filterNode.getPredicate();
+            }
+            else {
+                sourceNode = node.getSource();
+                filterExpression = BooleanLiteral.TRUE_LITERAL;
+            }
+
+            List<Symbol> outputSymbols = node.getOutputSymbols();
+
+            return visitScanFilterAndProject(context, node.getId(), sourceNode, filterExpression, node.getAssignmentsList(), outputSymbols);
         }
 
         // TODO: This should be refactored, so that there's an optimizer that merges scan-filter-project into a single PlanNode
@@ -939,7 +962,7 @@ public class LocalExecutionPlanner
                 PlanNodeId planNodeId,
                 PlanNode sourceNode,
                 Expression filterExpression,
-                Map<Symbol, Expression> projectionExpressions,
+                List<Map<Symbol, Expression>> projectionExpressionsList,
                 List<Symbol> outputSymbols)
         {
             // if source is a table scan we fold it directly into the filter and project
@@ -987,9 +1010,15 @@ public class LocalExecutionPlanner
             SymbolToInputRewriter symbolToInputRewriter = new SymbolToInputRewriter(sourceLayout);
             Expression rewrittenFilter = ExpressionTreeRewriter.rewriteWith(symbolToInputRewriter, filterExpression);
 
-            List<Expression> rewrittenProjections = new ArrayList<>();
-            for (Symbol symbol : outputSymbols) {
-                rewrittenProjections.add(ExpressionTreeRewriter.rewriteWith(symbolToInputRewriter, projectionExpressions.get(symbol)));
+            List<List<Expression>> rewrittenProjectionsList = new ArrayList<>();
+            List<Expression> allRewrittenProjections = new ArrayList<>();
+            for (Map<Symbol, Expression> projectionExpressions : projectionExpressionsList) {
+                List<Expression> rewrittenProjections = new ArrayList<>();
+                for (Symbol symbol : outputSymbols) {
+                    rewrittenProjections.add(ExpressionTreeRewriter.rewriteWith(symbolToInputRewriter, projectionExpressions.get(symbol)));
+                }
+                rewrittenProjectionsList.add(rewrittenProjections);
+                allRewrittenProjections.addAll(rewrittenProjections);
             }
 
             IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypesFromInput(
@@ -997,17 +1026,34 @@ public class LocalExecutionPlanner
                     metadata,
                     sqlParser,
                     sourceTypes,
-                    concat(singleton(rewrittenFilter), rewrittenProjections));
+                    concat(singleton(rewrittenFilter), allRewrittenProjections));
 
             RowExpression translatedFilter = toRowExpression(rewrittenFilter, expressionTypes);
-            List<RowExpression> translatedProjections = rewrittenProjections.stream()
-                    .map(expression -> toRowExpression(expression, expressionTypes))
-                    .collect(toImmutableList());
+            List<List<RowExpression>> translatedProjectionsList = new ArrayList<>();
+            for (List<Expression> rewrittenProjections : rewrittenProjectionsList) {
+                List<RowExpression> translatedProjections = rewrittenProjections.stream()
+                        .map(expression -> toRowExpression(expression, expressionTypes))
+                        .collect(toImmutableList());
+                translatedProjectionsList.add(translatedProjections);
+            }
 
             try {
+                // Get types from all projections, this handles the case when one projection has null value while other has other value
+                List<Type> types = new ArrayList<>();
+                for (Expression expression : rewrittenProjectionsList.get(0)) {
+                    types.add(expressionTypes.get(expression));
+                }
+                for (List<Expression> rewrittenProjections : rewrittenProjectionsList) {
+                    for (int i = 1; i < rewrittenProjections.size(); i++) { // index 0 is already considered
+                        Type type = expressionTypes.get(rewrittenProjections.get(i));
+                        if (!(type instanceof UnknownType)) {
+                            types.set(i, type);
+                        }
+                    }
+                }
                 if (columns != null) {
-                    Supplier<CursorProcessor> cursorProcessor = compiler.compileCursorProcessor(translatedFilter, translatedProjections, sourceNode.getId());
-                    Supplier<PageProcessor> pageProcessor = compiler.compilePageProcessor(translatedFilter, translatedProjections);
+                    Supplier<CursorProcessor> cursorProcessor = compiler.compileCursorProcessor(translatedFilter, translatedProjectionsList, sourceNode.getId());
+                    Supplier<PageProcessor> pageProcessor = compiler.compilePageProcessor(translatedFilter, translatedProjectionsList);
 
                     SourceOperatorFactory operatorFactory = new ScanFilterAndProjectOperator.ScanFilterAndProjectOperatorFactory(
                             context.getNextOperatorId(),
@@ -1017,18 +1063,18 @@ public class LocalExecutionPlanner
                             cursorProcessor,
                             pageProcessor,
                             columns,
-                            Lists.transform(rewrittenProjections, forMap(expressionTypes)));
+                            types);
 
                     return new PhysicalOperation(operatorFactory, outputMappings);
                 }
                 else {
-                    Supplier<PageProcessor> processor = compiler.compilePageProcessor(translatedFilter, translatedProjections);
+                    Supplier<PageProcessor> processor = compiler.compilePageProcessor(translatedFilter, translatedProjectionsList);
 
                     OperatorFactory operatorFactory = new FilterAndProjectOperator.FilterAndProjectOperatorFactory(
                             context.getNextOperatorId(),
                             planNodeId,
                             processor,
-                            Lists.transform(rewrittenProjections, forMap(expressionTypes)));
+                            types);
 
                     return new PhysicalOperation(operatorFactory, outputMappings, source);
                 }
@@ -1038,8 +1084,12 @@ public class LocalExecutionPlanner
                     throw new PrestoException(COMPILER_ERROR, "Compiler failed and interpreter is disabled", e);
                 }
 
+                if (projectionExpressionsList.size() > 1) {
+                    throw new PrestoException(NOT_SUPPORTED, "Compiler failed and Expand Node not supported with interpreter, retry with optimizer.optimize-distinct-aggregations=false");
+                }
+
                 // compilation failed, use interpreter
-                log.error(e, "Compile failed for filter=%s projections=%s sourceTypes=%s error=%s", filterExpression, projectionExpressions, sourceTypes, e);
+                log.error(e, "Compile failed for filter=%s projections=%s sourceTypes=%s error=%s", filterExpression, projectionExpressionsList, sourceTypes, e);
             }
 
             FilterFunction filterFunction;
@@ -1050,6 +1100,7 @@ public class LocalExecutionPlanner
                 filterFunction = FilterFunctions.TRUE_FUNCTION;
             }
 
+            Map<Symbol, Expression> projectionExpressions = Iterables.getOnlyElement(projectionExpressionsList);
             List<ProjectionFunction> projectionFunctions = new ArrayList<>();
             for (Symbol symbol : outputSymbols) {
                 Expression expression = projectionExpressions.get(symbol);

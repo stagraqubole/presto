@@ -599,7 +599,7 @@ public final class FunctionAssertions
 
         try {
             List<RowExpression> projections = ImmutableList.of(toRowExpression(projection, expressionTypes));
-            Supplier<PageProcessor> processor = compiler.compilePageProcessor(toRowExpression(filter, expressionTypes), projections);
+            Supplier<PageProcessor> processor = compiler.compilePageProcessor(toRowExpression(filter, expressionTypes), ImmutableList.of(projections));
 
             return new FilterAndProjectOperator.FilterAndProjectOperatorFactory(0, new PlanNodeId("test"), processor, ImmutableList.of(expressionTypes.get(projection)));
         }
@@ -622,12 +622,12 @@ public final class FunctionAssertions
         try {
             Supplier<CursorProcessor> cursorProcessor = compiler.compileCursorProcessor(
                     toRowExpression(filter, expressionTypes),
-                    ImmutableList.of(toRowExpression(projection, expressionTypes)),
+                    ImmutableList.of(ImmutableList.of(toRowExpression(projection, expressionTypes))),
                     SOURCE_ID);
 
             Supplier<PageProcessor> pageProcessor = compiler.compilePageProcessor(
                     toRowExpression(filter, expressionTypes),
-                    ImmutableList.of(toRowExpression(projection, expressionTypes)));
+                    ImmutableList.of(ImmutableList.of(toRowExpression(projection, expressionTypes))));
 
             return new ScanFilterAndProjectOperator.ScanFilterAndProjectOperatorFactory(
                     0,

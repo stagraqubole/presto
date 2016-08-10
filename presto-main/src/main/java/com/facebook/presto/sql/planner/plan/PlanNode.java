@@ -29,6 +29,7 @@ import static java.util.Objects.requireNonNull;
 @JsonSubTypes({
         @JsonSubTypes.Type(value = OutputNode.class, name = "output"),
         @JsonSubTypes.Type(value = ProjectNode.class, name = "project"),
+        @JsonSubTypes.Type(value = ExpandNode.class, name = "expand"),
         @JsonSubTypes.Type(value = TableScanNode.class, name = "tablescan"),
         @JsonSubTypes.Type(value = ValuesNode.class, name = "values"),
         @JsonSubTypes.Type(value = AggregationNode.class, name = "aggregation"),

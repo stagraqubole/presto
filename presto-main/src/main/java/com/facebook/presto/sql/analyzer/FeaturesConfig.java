@@ -88,6 +88,8 @@ public class FeaturesConfig
         return experimentalSyntaxEnabled;
     }
 
+    private boolean optimizeDistinctAggregations;
+
     @LegacyConfig("analyzer.experimental-syntax-enabled")
     @Config("experimental-syntax-enabled")
     public FeaturesConfig setExperimentalSyntaxEnabled(boolean enabled)
@@ -267,6 +269,18 @@ public class FeaturesConfig
     public FeaturesConfig setRegexLibrary(RegexLibrary regexLibrary)
     {
         this.regexLibrary = regexLibrary;
+        return this;
+    }
+
+    public boolean isOptimizeDistinctAggregations()
+    {
+        return optimizeDistinctAggregations;
+    }
+
+    @Config("optimizer.optimize-distinct-aggregations")
+    public FeaturesConfig setOptimizeDistinctAggregations(boolean optimizeDistinctAggregations)
+    {
+        this.optimizeDistinctAggregations = optimizeDistinctAggregations;
         return this;
     }
 }

@@ -127,6 +127,12 @@ public class ChildReplacer
     }
 
     @Override
+    public PlanNode visitExpand(ExpandNode node, List<PlanNode> newChildren)
+    {
+        return new ExpandNode(node.getId(), Iterables.getOnlyElement(newChildren), node.getAssignmentsList());
+    }
+
+    @Override
     public PlanNode visitFilter(FilterNode node, List<PlanNode> newChildren)
     {
         return new FilterNode(node.getId(), Iterables.getOnlyElement(newChildren), node.getPredicate());
