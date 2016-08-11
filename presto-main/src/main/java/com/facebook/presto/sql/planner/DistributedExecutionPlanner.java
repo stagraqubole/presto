@@ -230,7 +230,7 @@ public class DistributedExecutionPlanner
         }
 
         @Override
-        public Optional<SplitSource> visitExpand(ExpandNode node, Void context)
+        public Map<PlanNodeId, SplitSource> visitExpand(ExpandNode node, Void context)
         {
             return node.getSource().accept(this, context);
         }

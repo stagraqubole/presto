@@ -81,7 +81,7 @@ public class ExpressionCompiler
         return pageProcessors.size();
     }
 
-    public CursorProcessor compileCursorProcessor(RowExpression filter, List<List<RowExpression>> projections, Object uniqueKey)
+    public Supplier<CursorProcessor> compileCursorProcessor(RowExpression filter, List<List<RowExpression>> projections, Object uniqueKey)
     {
         Class<? extends CursorProcessor> cursorProcessor = cursorProcessors.getUnchecked(new CacheKey(filter, projections, uniqueKey));
         return () -> {
@@ -94,7 +94,7 @@ public class ExpressionCompiler
         };
     }
 
-    public Supplier<PageProcessor> compilePageProcessor(RowExpression filter, List<RowExpression> projections)
+    public Supplier<PageProcessor> compilePageProcessor(RowExpression filter, List<List<RowExpression>> projections)
     {
         Class<? extends PageProcessor> pageProcessor = pageProcessors.getUnchecked(new CacheKey(filter, projections, null));
         return () -> {
@@ -107,7 +107,7 @@ public class ExpressionCompiler
         };
     }
 
-    private <T> Class<? extends T> compile(RowExpression filter, List<RowExpression> projections, BodyCompiler<T> bodyCompiler, Class<? extends T> superType)
+    private <T> Class<? extends T> compile(RowExpression filter, List<List<RowExpression>> projections, BodyCompiler<T> bodyCompiler, Class<? extends T> superType)
     {
         // create filter and project page iterator class
         try {
@@ -120,7 +120,7 @@ public class ExpressionCompiler
 
     private <T> Class<? extends T> compileProcessor(
             RowExpression filter,
-            List<RowExpression> projections,
+            List<List<RowExpression>> projections,
             BodyCompiler<T> bodyCompiler,
             Class<? extends T> superType)
     {
@@ -159,10 +159,10 @@ public class ExpressionCompiler
     private static final class CacheKey
     {
         private final RowExpression filter;
-        private final List<RowExpression> projections;
+        private final List<List<RowExpression>> projections;
         private final Object uniqueKey;
 
-        private CacheKey(RowExpression filter, List<RowExpression> projections, Object uniqueKey)
+        private CacheKey(RowExpression filter, List<List<RowExpression>> projections, Object uniqueKey)
         {
             this.filter = filter;
             this.uniqueKey = uniqueKey;
@@ -174,7 +174,7 @@ public class ExpressionCompiler
             return filter;
         }
 
-        private List<RowExpression> getProjections()
+        private List<List<RowExpression>> getProjections()
         {
             return projections;
         }

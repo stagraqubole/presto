@@ -143,7 +143,7 @@ public class BenchmarkArrayHashCodeOperator
             blocks[0] = createChannel(POSITIONS, ARRAY_SIZE, arrayType);
 
             ImmutableList<RowExpression> projections = projectionsBuilder.build();
-            pageProcessor = compiler.compilePageProcessor(new ConstantExpression(true, BOOLEAN), projections).get();
+            pageProcessor = compiler.compilePageProcessor(new ConstantExpression(true, BOOLEAN), ImmutableList.of(projections)).get();
             pageBuilder = new PageBuilder(projections.stream().map(RowExpression::getType).collect(Collectors.toList()));
             page = new Page(blocks);
         }
