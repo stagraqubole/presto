@@ -816,7 +816,7 @@ public class HashGenerationOptimizer
             return hashExpression;
         }
 
-        public static Expression getHashFunctionCall(Expression previousHashValue, Symbol symbol)
+        static Expression getHashFunctionCall(Expression previousHashValue, Symbol symbol)
         {
             FunctionCall functionCall = new FunctionCall(
                     QualifiedName.of(HASH_CODE),

@@ -50,7 +50,7 @@ public class TestFeaturesConfig
                 .setRegexLibrary(JONI)
                 .setRe2JDfaStatesLimit(Integer.MAX_VALUE)
                 .setRe2JDfaRetries(5)
-                .setResourceGroupManager(FILE_BASED_RESOURCE_GROUP_MANAGER))
+                .setResourceGroupManager(FILE_BASED_RESOURCE_GROUP_MANAGER)
                 .setOptimizeDistinctAggregations(true));
     }
 

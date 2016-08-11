@@ -15,6 +15,7 @@ package com.facebook.presto.sql.planner.optimizations;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
+import com.facebook.presto.metadata.FunctionRegistry;
 import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.spi.type.BigintType;
 import com.facebook.presto.spi.type.Type;
@@ -27,14 +28,16 @@ import com.facebook.presto.sql.planner.plan.MarkDistinctNode;
 import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.SimplePlanRewriter;
+import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.LongLiteral;
 import com.facebook.presto.sql.tree.NullLiteral;
-import com.facebook.presto.sql.tree.QualifiedNameReference;
+import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.SearchedCaseExpression;
 import com.facebook.presto.sql.tree.WhenClause;
+import com.facebook.presto.type.TypeUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -51,8 +54,10 @@ import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.SINGLE;
 import static java.util.Objects.requireNonNull;
 
 public class DistinctOptimizer
-        extends PlanOptimizer
+        implements PlanOptimizer
 {
+    private static final String HASH_CODE = FunctionRegistry.mangleOperatorName("HASH_CODE");
+
     @Override
     public PlanNode optimize(PlanNode plan, Session session, Map<Symbol, Type> types, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator)
     {
@@ -102,14 +107,14 @@ public class DistinctOptimizer
                     aggregations.put(entry.getKey(), new FunctionCall(functionCall.getName(),
                             functionCall.getWindow(),
                             false,
-                            ImmutableList.of(Iterables.getOnlyElement(aggregateInfo.getDistinctAggregateSymbols().values()).toQualifiedNameReference())));
+                            ImmutableList.of(Iterables.getOnlyElement(aggregateInfo.getDistinctAggregateSymbols().values()).toSymbolReference())));
                 }
                 else {
                     // putting same function, should ideally be first_non_null
                     aggregations.put(entry.getKey(), new FunctionCall(functionCall.getName(),
                             functionCall.getWindow(),
                             false,
-                            ImmutableList.of(aggregateInfo.getNonDistinctAggregateSymbols().get(entry.getKey()).toQualifiedNameReference())));
+                            ImmutableList.of(aggregateInfo.getNonDistinctAggregateSymbols().get(entry.getKey()).toSymbolReference())));
                 }
             }
 
@@ -120,6 +125,7 @@ public class DistinctOptimizer
                     aggregations.build(),
                     node.getFunctions(),
                     Collections.emptyMap(),
+                    node.getGroupingSets(),
                     node.getStep(),
                     node.getSampleWeight(),
                     node.getConfidence(),
@@ -189,7 +195,7 @@ public class DistinctOptimizer
                 }
                 else {
                     for (Symbol symbol : allSymbols) {
-                        actualAssignmentsBuilder.put(symbol, symbol.toQualifiedNameReference());
+                        actualAssignmentsBuilder.put(symbol, symbol.toSymbolReference());
                     }
                 }
 
@@ -265,7 +271,7 @@ public class DistinctOptimizer
                 ImmutableMap.Builder<Symbol, Signature> functions = ImmutableMap.builder();
                 for (Map.Entry<Symbol, FunctionCall> entry : aggregateInfo.get().getAggregations().entrySet()) {
                     if (!entry.getValue().isDistinct()) {
-                        Symbol newSymbol = symbolAllocator.newSymbol(entry.getKey().toQualifiedNameReference(), symbolAllocator.getTypes().get(entry.getKey()));
+                        Symbol newSymbol = symbolAllocator.newSymbol(entry.getKey().toSymbolReference(), symbolAllocator.getTypes().get(entry.getKey()));
                         nonDistinctAggregationSymbolMapBuilder.put(newSymbol, entry.getKey());
                         aggregations.put(newSymbol, entry.getValue());
                         functions.put(newSymbol, aggregateInfo.get().getFunctions().get(entry.getKey()));
@@ -277,6 +283,7 @@ public class DistinctOptimizer
                         aggregations.build(), // aggregations using same args but output symbol different
                         functions.build(),
                         Collections.emptyMap(),
+                        ImmutableList.of(), // TODO stagra: GROUPING SET!!! One more variable to fix
                         SINGLE,
                         Optional.empty(),
                         1.0,
@@ -307,23 +314,23 @@ public class DistinctOptimizer
                         Symbol newSymbol = symbolAllocator.newSymbol("expr", symbolAllocator.getTypes().get(symbol));
                         outputDistinctAggregateSymbols.put(symbol, newSymbol);
                         // for multiple distincts, need to store map of which distinct symbol has what group to pass as leftSymbol
-                        Expression expression = createIfExpression(groupSymbol.toQualifiedNameReference(),
+                        Expression expression = createIfExpression(groupSymbol.toSymbolReference(),
                                 new LongLiteral("1"),
                                 ComparisonExpression.Type.EQUAL,
-                                symbol.toQualifiedNameReference());
+                                symbol.toSymbolReference());
                         outputSymbols.put(newSymbol, expression);
                     }
                     else if (nonDistinctAggregationsSymboMap.containsKey(symbol)) {
                         Symbol newSymbol = symbolAllocator.newSymbol("expr", symbolAllocator.getTypes().get(symbol));
                         outputNonDistinctAggregateSymbols.put(nonDistinctAggregationsSymboMap.get(symbol), newSymbol); // key of this map is key of an aggregatio in AggrNode above, it will now aggregate on this Map's value
-                        Expression expression = createIfExpression(groupSymbol.toQualifiedNameReference(),
+                        Expression expression = createIfExpression(groupSymbol.toSymbolReference(),
                                 new LongLiteral("0"),
                                 ComparisonExpression.Type.EQUAL,
-                                symbol.toQualifiedNameReference());
+                                symbol.toSymbolReference());
                         outputSymbols.put(newSymbol, expression);
                     }
                     else {
-                        Expression expression = new QualifiedNameReference(symbol.toQualifiedName());
+                        Expression expression = symbol.toSymbolReference();
                         outputSymbols.put(symbol, expression);
                     }
                 }
@@ -342,15 +349,6 @@ public class DistinctOptimizer
                         outputSymbols.build());
             }
             return context.defaultRewrite(node, Optional.empty());
-        }
-
-        private static Expression getHashExpression(List<Symbol> partitioningSymbols, int groupId)
-        {
-            Expression hashExpression = new LongLiteral(String.valueOf(groupId));
-            for (Symbol symbol : partitioningSymbols) {
-                hashExpression = HashGenerationOptimizer.getHashFunctionCall(hashExpression, symbol);
-            }
-            return hashExpression;
         }
 
         // creates if clause specific to use case here, default value always null
@@ -375,6 +373,33 @@ public class DistinctOptimizer
             else {
                 return context.rewrite(node, aggregateInfo);
             }
+        }
+
+        // below methods from HashGenerationOptimizer with slight modification
+
+        private static Expression getHashExpression(List<Symbol> partitioningSymbols, int groupId)
+        {
+            Expression hashExpression = new LongLiteral(String.valueOf(groupId));
+            for (Symbol symbol : partitioningSymbols) {
+                hashExpression = getHashFunctionCall(hashExpression, symbol);
+            }
+            return hashExpression;
+        }
+
+        private static Expression getHashFunctionCall(Expression previousHashValue, Symbol symbol)
+        {
+            FunctionCall functionCall = new FunctionCall(
+                    QualifiedName.of(HASH_CODE),
+                    Optional.empty(),
+                    false,
+                    ImmutableList.of(symbol.toSymbolReference()));
+            List<Expression> arguments = ImmutableList.of(previousHashValue, orNullHashCode(functionCall));
+            return new FunctionCall(QualifiedName.of("combine_hash"), arguments);
+        }
+
+        private static Expression orNullHashCode(Expression expression)
+        {
+            return new CoalesceExpression(expression, new LongLiteral(String.valueOf(TypeUtils.NULL_HASH_CODE)));
         }
     }
 

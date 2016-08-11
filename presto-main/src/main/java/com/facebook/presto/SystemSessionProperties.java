@@ -220,7 +220,7 @@ public final class SystemSessionProperties
                         COLOCATED_JOIN,
                         "Experimental: Use a colocated join when possible",
                         featuresConfig.isColocatedJoinsEnabled(),
-                        false)),
+                        false),
                 booleanSessionProperty(
                         OPTIMIZE_DISTINCT_AGGREGATIONS,
                         "Compute hash codes for distribution, joins, and aggregations early in query plan",
