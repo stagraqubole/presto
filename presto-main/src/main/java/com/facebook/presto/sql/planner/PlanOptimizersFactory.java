@@ -100,7 +100,7 @@ public class PlanOptimizersFactory
             builder.add(new PruneUnreferencedOutputs());
         }
 
-        builder.add(new DistinctOptimizer());
+        builder.add(new DistinctOptimizer(metadata));
         if (!forceSingleNode) {
             builder.add(new PushTableWriteThroughUnion()); // Must run before AddExchanges
             builder.add(new AddExchanges(metadata, sqlParser));

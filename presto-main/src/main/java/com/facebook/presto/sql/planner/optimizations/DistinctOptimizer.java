@@ -16,6 +16,7 @@ package com.facebook.presto.sql.planner.optimizations;
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.metadata.FunctionRegistry;
+import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.spi.type.BigintType;
 import com.facebook.presto.spi.type.Type;
@@ -57,13 +58,19 @@ import static java.util.Objects.requireNonNull;
 public class DistinctOptimizer
         implements PlanOptimizer
 {
+    private final Metadata metadata;
     private static final String HASH_CODE = FunctionRegistry.mangleOperatorName("HASH_CODE");
+
+    public DistinctOptimizer(Metadata metadata)
+    {
+        this.metadata = metadata;
+    }
 
     @Override
     public PlanNode optimize(PlanNode plan, Session session, Map<Symbol, Type> types, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator)
     {
         if (SystemSessionProperties.isOptimizeDistinctAggregationEnabled(session)) {
-            return SimplePlanRewriter.rewriteWith(new Optimizer(idAllocator, symbolAllocator),
+            return SimplePlanRewriter.rewriteWith(new Optimizer(idAllocator, symbolAllocator, metadata),
                     plan,
                     Optional.empty());
         }
@@ -76,11 +83,13 @@ public class DistinctOptimizer
     {
         private final PlanNodeIdAllocator idAllocator;
         private final SymbolAllocator symbolAllocator;
+        private final Metadata metadata;
 
-        private Optimizer(PlanNodeIdAllocator idAllocator, SymbolAllocator symbolAllocator)
+        private Optimizer(PlanNodeIdAllocator idAllocator, SymbolAllocator symbolAllocator, Metadata metadata)
         {
             this.idAllocator = requireNonNull(idAllocator, "idAllocator is null");
             this.symbolAllocator = requireNonNull(symbolAllocator, "symbolAllocator is null");
+            this.metadata = requireNonNull(metadata, "metadata is null");
         }
 
         @Override
@@ -99,6 +108,7 @@ public class DistinctOptimizer
             PlanNode source = context.rewrite(node.getSource(), Optional.of(aggregateInfo));
 
             ImmutableMap.Builder<Symbol, FunctionCall> aggregations = ImmutableMap.builder();
+            ImmutableMap.Builder<Symbol, Signature> functions = ImmutableMap.builder();
             for (Map.Entry<Symbol, FunctionCall> entry : node.getAggregations().entrySet()) {
                 FunctionCall functionCall = entry.getValue();
                 if (entry.getValue().isDistinct()) {
@@ -106,12 +116,18 @@ public class DistinctOptimizer
                             functionCall.getWindow(),
                             false,
                             ImmutableList.of(Iterables.getOnlyElement(aggregateInfo.getDistinctAggregateSymbols().values()).toSymbolReference())));
+                    functions.put(entry.getKey(), node.getFunctions().get(entry.getKey()));
                 }
                 else {
-                    aggregations.put(entry.getKey(), new FunctionCall(functionCall.getName(),
+                    // Aggregations on non-distinct are already done by new node, just extract the non-null value
+                    Symbol argument = aggregateInfo.getNonDistinctAggregateSymbols().get(entry.getKey());
+                    QualifiedName functionName = QualifiedName.of("arbitrary");
+                    aggregations.put(entry.getKey(), new FunctionCall(functionName,
                             functionCall.getWindow(),
                             false,
-                            ImmutableList.of(aggregateInfo.getNonDistinctAggregateSymbols().get(entry.getKey()).toSymbolReference())));
+                            ImmutableList.of(argument.toSymbolReference())));
+                    functions.put(entry.getKey(),
+                            metadata.getFunctionRegistry().resolveFunction(functionName, ImmutableList.of(symbolAllocator.getTypes().get(argument).getTypeSignature()), false));
                 }
             }
 
@@ -119,7 +135,7 @@ public class DistinctOptimizer
                     source,
                     node.getGroupBy(),
                     aggregations.build(),
-                    node.getFunctions(),
+                    functions.build(),
                     Collections.emptyMap(),
                     node.getGroupingSets(),
                     node.getStep(),
