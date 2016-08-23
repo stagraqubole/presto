@@ -172,14 +172,17 @@ public class DistinctOptimizer
                 if (nonDistinctAggregateSymbols.contains(distinctSymbol)) {
                     Symbol newSymbol = symbolAllocator.newSymbol(distinctSymbol.getName(), symbolAllocator.getTypes().get(distinctSymbol));
                     nonDistinctAggregateSymbols.set(nonDistinctAggregateSymbols.indexOf(distinctSymbol), newSymbol);
-                    distinctSymbolForNonDistinctAggregates = distinctSymbol;
+                    distinctSymbolForNonDistinctAggregates = newSymbol;
 
                     // Add project node to get stream for new symbol
                     ImmutableMap.Builder builder = new ImmutableMap.Builder();
                     for (Symbol symbol : node.getSource().getOutputSymbols()) {
                         builder.put(symbol, symbol.toSymbolReference());
                     }
-                    builder.put(newSymbol, distinctSymbol.toSymbolReference());
+                    // Cast to avoid UnaliasSymbolReference from removing this projection
+                    // TODO: find better way to prevent UnaliaSymbolRefrence optimizing out the project
+                    builder.put(newSymbol, new Cast(distinctSymbol.toSymbolReference(),
+                            symbolAllocator.getTypes().get(distinctSymbol).getDisplayName()));
 
                     source = new ProjectNode(idAllocator.getNextId(), node.getSource(), builder.build());
                 }
@@ -237,11 +240,11 @@ public class DistinctOptimizer
                         }
                         else {
                             // Handling for cases when mask symbol appears in non distinct aggregations too
-                            if (functionCall.getArguments().contains(distinctSymbol)) {
+                            if (functionCall.getArguments().contains(distinctSymbol.toSymbolReference())) {
                                 ImmutableList.Builder arguments = ImmutableList.builder();
                                 for (Expression argument : functionCall.getArguments()) {
                                     if (distinctSymbol.toSymbolReference().equals(argument)) {
-                                        arguments.add(distinctSymbolForNonDistinctAggregates);
+                                        arguments.add(distinctSymbolForNonDistinctAggregates.toSymbolReference());
                                     }
                                     else {
                                         arguments.add(argument);
