@@ -47,10 +47,12 @@ import com.google.common.collect.Iterables;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.SINGLE;
 import static java.util.Objects.requireNonNull;
@@ -115,12 +117,12 @@ public class DistinctOptimizer
                     aggregations.put(entry.getKey(), new FunctionCall(functionCall.getName(),
                             functionCall.getWindow(),
                             false,
-                            ImmutableList.of(Iterables.getOnlyElement(aggregateInfo.getDistinctAggregateSymbols().values()).toSymbolReference())));
+                            ImmutableList.of(Iterables.getOnlyElement(aggregateInfo.getNewDistinctAggregateSymbols().values()).toSymbolReference())));
                     functions.put(entry.getKey(), node.getFunctions().get(entry.getKey()));
                 }
                 else {
                     // Aggregations on non-distinct are already done by new node, just extract the non-null value
-                    Symbol argument = aggregateInfo.getNonDistinctAggregateSymbols().get(entry.getKey());
+                    Symbol argument = aggregateInfo.getNewNonDistinctAggregateSymbols().get(entry.getKey());
                     QualifiedName functionName = QualifiedName.of("arbitrary");
                     aggregations.put(entry.getKey(), new FunctionCall(functionName,
                             functionCall.getWindow(),
@@ -153,26 +155,34 @@ public class DistinctOptimizer
             Optional<AggregateInfo> aggregateInfo = context.get();
             // presence of aggregateInfo => mask also present
             if (aggregateInfo.isPresent() && aggregateInfo.get().getMask().get().equals(node.getMarkerSymbol())) {
+                PlanNode source = node.getSource();
+
                 List<Symbol> allSymbols = new ArrayList<>();
                 List<Symbol> groupBySymbols = aggregateInfo.get().getGroupBySymbols(); // a
                 allSymbols.addAll(groupBySymbols);
 
-                // (allSymbols) - (distinctSymbols of MarkDistinct) = symbols in other aggregations
-                List<Symbol> nonDistinctAggregateSymbols = new ArrayList<>(node.getSource().getOutputSymbols());
-                if (node.getHashSymbol().isPresent()) {
-                    // dont need hashSymbol
-                    nonDistinctAggregateSymbols.remove(node.getHashSymbol().get());
-                }
-                nonDistinctAggregateSymbols.removeAll(node.getDistinctSymbols()); // b
+                List<Symbol> nonDistinctAggregateSymbols = aggregateInfo.get().getOriginalNonDistinctAggregateArgs(); //b
                 allSymbols.addAll(nonDistinctAggregateSymbols);
 
-                // Distinct Symbol = DistinctSymbols - GBY symbols
-                List<Symbol> leftSymbols = new ArrayList(node.getDistinctSymbols());
-                if (!groupBySymbols.isEmpty()) {
-                    leftSymbols.removeAll(groupBySymbols);
-                }
-                Symbol distinctSymbol = Iterables.getOnlyElement(leftSymbols); // c
+                Symbol distinctSymbol = Iterables.getOnlyElement(aggregateInfo.get().getOriginalDistinctAggregateArgs()); // c
+                Symbol distinctSymbolForNonDistinctAggregates = distinctSymbol;
                 allSymbols.add(distinctSymbol);
+
+                // If non-distinct aggregation on same symbol which had distinct mask, add new block
+                if (nonDistinctAggregateSymbols.contains(distinctSymbol)) {
+                    Symbol newSymbol = symbolAllocator.newSymbol(distinctSymbol.getName(), symbolAllocator.getTypes().get(distinctSymbol));
+                    nonDistinctAggregateSymbols.set(nonDistinctAggregateSymbols.indexOf(distinctSymbol), newSymbol);
+                    distinctSymbolForNonDistinctAggregates = distinctSymbol;
+
+                    // Add project node to get stream for new symbol
+                    ImmutableMap.Builder builder = new ImmutableMap.Builder();
+                    for (Symbol symbol : node.getSource().getOutputSymbols()) {
+                        builder.put(symbol, symbol.toSymbolReference());
+                    }
+                    builder.put(newSymbol, distinctSymbol.toSymbolReference());
+
+                    source = new ProjectNode(idAllocator.getNextId(), node.getSource(), builder.build());
+                }
 
                 Symbol groupSymbol = symbolAllocator.newSymbol("group", BigintType.BIGINT); // g
 
@@ -196,7 +206,7 @@ public class DistinctOptimizer
                 groups.add(group1);
 
                 GroupIdNode groupIdNode = new GroupIdNode(idAllocator.getNextId(),
-                        node.getSource(),
+                        source,
                         groups,
                         ImmutableMap.of(),
                         groupSymbol);
@@ -218,10 +228,31 @@ public class DistinctOptimizer
                 ImmutableMap.Builder<Symbol, FunctionCall> aggregations = ImmutableMap.builder();
                 ImmutableMap.Builder<Symbol, Signature> functions = ImmutableMap.builder();
                 for (Map.Entry<Symbol, FunctionCall> entry : aggregateInfo.get().getAggregations().entrySet()) {
-                    if (!entry.getValue().isDistinct()) {
+                    FunctionCall functionCall = entry.getValue();
+                    if (!functionCall.isDistinct()) {
                         Symbol newSymbol = symbolAllocator.newSymbol(entry.getKey().toSymbolReference(), symbolAllocator.getTypes().get(entry.getKey()));
                         nonDistinctAggregationSymbolMapBuilder.put(newSymbol, entry.getKey());
-                        aggregations.put(newSymbol, entry.getValue());
+                        if (source == node.getSource()) {
+                            aggregations.put(newSymbol, functionCall);
+                        }
+                        else {
+                            // Handling for cases when mask symbol appears in non distinct aggregations too
+                            if (functionCall.getArguments().contains(distinctSymbol)) {
+                                ImmutableList.Builder arguments = ImmutableList.builder();
+                                for (Expression argument : functionCall.getArguments()) {
+                                    if (distinctSymbol.toSymbolReference().equals(argument)) {
+                                        arguments.add(distinctSymbolForNonDistinctAggregates);
+                                    }
+                                    else {
+                                        arguments.add(argument);
+                                    }
+                                }
+                                aggregations.put(newSymbol, new FunctionCall(functionCall.getName(), functionCall.getWindow(), false, arguments.build()));
+                            }
+                            else {
+                                aggregations.put(newSymbol, functionCall);
+                            }
+                        }
                         functions.put(newSymbol, aggregateInfo.get().getFunctions().get(entry.getKey()));
                     }
                 }
@@ -287,8 +318,8 @@ public class DistinctOptimizer
                 // unused mask will be removed by PruneUnreferencedOutputs
                 outputSymbols.put(aggregateInfo.get().getMask().get(), new NullLiteral());
 
-                aggregateInfo.get().setNonDistinctAggregateSymbols(outputNonDistinctAggregateSymbols.build());
-                aggregateInfo.get().setDistinctAggregateSymbols(outputDistinctAggregateSymbols.build());
+                aggregateInfo.get().setNewNonDistinctAggregateSymbols(outputNonDistinctAggregateSymbols.build());
+                aggregateInfo.get().setNewDistinctAggregateSymbols(outputDistinctAggregateSymbols.build());
 
                 // This project node is useful when previous aggregation node calculated a value for injected null values
                 // e.g. count function would have resulted in 0 for null value, but another count over this would return 1
@@ -339,8 +370,8 @@ public class DistinctOptimizer
         private Map<Symbol, Signature> functions;
 
         // Filled on the way back, these are the symbols corresponding to their distinct or non-distinct original symbols
-        private Map<Symbol, Symbol> nonDistinctAggregateSymbols;
-        private Map<Symbol, Symbol> distinctAggregateSymbols;
+        private Map<Symbol, Symbol> newNonDistinctAggregateSymbols;
+        private Map<Symbol, Symbol> newDistinctAggregateSymbols;
 
         public AggregateInfo(List<Symbol> groupBySymbols, Symbol mask, Map<Symbol, FunctionCall> aggregations, Map<Symbol, Signature> functions)
         {
@@ -354,24 +385,44 @@ public class DistinctOptimizer
             this.functions = ImmutableMap.copyOf(functions);
         }
 
-        public Map<Symbol, Symbol> getDistinctAggregateSymbols()
+        public List<Symbol> getOriginalNonDistinctAggregateArgs()
         {
-            return distinctAggregateSymbols;
+            Set<Symbol> arguments = new HashSet<Symbol>();
+            aggregations.values()
+                    .stream()
+                    .filter(functionCall -> !functionCall.isDistinct())
+                    .forEach(functionCall -> functionCall.getArguments().forEach(argument -> arguments.add(Symbol.from(argument))));
+            return arguments.stream().collect(Collectors.toList());
         }
 
-        public void setDistinctAggregateSymbols(Map<Symbol, Symbol> distinctAggregateSymbols)
+        public List<Symbol> getOriginalDistinctAggregateArgs()
         {
-            this.distinctAggregateSymbols = distinctAggregateSymbols;
+            Set<Symbol> arguments = new HashSet<Symbol>();
+            aggregations.values()
+                    .stream()
+                    .filter(functionCall -> functionCall.isDistinct())
+                    .forEach(functionCall -> functionCall.getArguments().forEach(argument -> arguments.add(Symbol.from(argument))));
+            return arguments.stream().collect(Collectors.toList());
         }
 
-        public Map<Symbol, Symbol> getNonDistinctAggregateSymbols()
+        public Map<Symbol, Symbol> getNewDistinctAggregateSymbols()
         {
-            return nonDistinctAggregateSymbols;
+            return newDistinctAggregateSymbols;
         }
 
-        public void setNonDistinctAggregateSymbols(Map<Symbol, Symbol> nonDistinctAggregateSymbols)
+        public void setNewDistinctAggregateSymbols(Map<Symbol, Symbol> newDistinctAggregateSymbols)
         {
-            this.nonDistinctAggregateSymbols = nonDistinctAggregateSymbols;
+            this.newDistinctAggregateSymbols = newDistinctAggregateSymbols;
+        }
+
+        public Map<Symbol, Symbol> getNewNonDistinctAggregateSymbols()
+        {
+            return newNonDistinctAggregateSymbols;
+        }
+
+        public void setNewNonDistinctAggregateSymbols(Map<Symbol, Symbol> newNonDistinctAggregateSymbols)
+        {
+            this.newNonDistinctAggregateSymbols = newNonDistinctAggregateSymbols;
         }
 
         public Optional<Symbol> getMask()
