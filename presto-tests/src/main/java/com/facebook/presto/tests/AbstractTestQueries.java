@@ -855,46 +855,24 @@ public abstract class AbstractTestQueries
         assertQuery("SELECT SUM(DISTINCT x) FROM (SELECT custkey, COUNT(DISTINCT orderstatus) x FROM orders GROUP BY custkey) t");
     }
 
-    /*@Test
+    @Test
     public void testDistinctOptimizer()
             throws Exception
     {
-        assertQuery("SELECT custkey, orderstatus, COUNT(orderkey), SUM(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
-        assertQuery("" +
-                        "SELECT custkey, max(orderkey), COUNT(DISTINCT orderstatus) FROM (" +
-                        "   SELECT orders.custkey AS custkey, orders.orderstatus AS orderstatus, orders.orderkey as orderkey " +
-                        "   FROM lineitem JOIN orders ON lineitem.orderkey = orders.orderkey AND orders.orderkey = lineitem.partkey " +
-                        "   GROUP BY orders.custkey, orders.orderstatus, orders.orderkey" +
-                        ") " +
-                        "GROUP BY custkey");
-        assertQuery("SELECT sum(custkey), COUNT(orderkey), sum(DISTINCT orderkey) FROM orders");
-    }*/
+        assertQuery("SELECT max(orderstatus), COUNT(orderkey), sum(DISTINCT orderkey) FROM orders");
 
-    @Test
-    public void testDistinctOptimizer1()
-            throws Exception
-    {
-        assertQuery("SELECT custkey, orderstatus, COUNT(orderkey), SUM(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
-    }
+        assertQuery("SELECT custkey, orderstatus, avg(shippriority), SUM(DISTINCT orderkey) FROM orders GROUP BY custkey, orderstatus");
 
-    @Test
-    public void testDistinctOptimizer2()
-            throws Exception
-    {
-        assertQuery("" +
-                "SELECT custkey, max(orderkey), COUNT(DISTINCT orderstatus) FROM (" +
-                "   SELECT orders.custkey AS custkey, orders.orderstatus AS orderstatus, orders.orderkey as orderkey " +
-                "   FROM lineitem JOIN orders ON lineitem.orderkey = orders.orderkey AND orders.orderkey = lineitem.partkey " +
-                "   GROUP BY orders.custkey, orders.orderstatus, orders.orderkey" +
-                ") " +
-                "GROUP BY custkey");
-    }
+        assertQuery("SELECT s, MAX(custkey), SUM(a) FROM (" +
+                    "    SELECT custkey, avg(shippriority) as a, SUM(DISTINCT orderkey) as s FROM orders GROUP BY custkey, orderstatus" +
+                    ") " +
+                    "GROUP BY s");
 
-    @Test
-    public void testDistinctOptimizer3()
-            throws Exception
-    {
-        assertQuery("SELECT sum(custkey), COUNT(orderkey), sum(DISTINCT orderkey) FROM orders");
+        assertQuery("SELECT max(orderstatus), COUNT(distinct orderkey), sum(DISTINCT orderkey) FROM orders");
+
+        assertQuery("SELECT max(orderstatus), COUNT(distinct shippriority), sum(DISTINCT orderkey) FROM orders");
+
+        assertQuery("SELECT COUNT(tan(shippriority)), sum(DISTINCT orderkey) FROM orders");
     }
 
     @Test
