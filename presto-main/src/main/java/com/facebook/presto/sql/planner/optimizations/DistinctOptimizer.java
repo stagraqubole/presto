@@ -30,7 +30,6 @@ import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.SimplePlanRewriter;
 import com.facebook.presto.sql.tree.Cast;
-import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
@@ -39,7 +38,6 @@ import com.facebook.presto.sql.tree.NullLiteral;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.SearchedCaseExpression;
 import com.facebook.presto.sql.tree.WhenClause;
-import com.facebook.presto.type.TypeUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -57,6 +55,17 @@ import java.util.stream.Collectors;
 import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.SINGLE;
 import static java.util.Objects.requireNonNull;
 
+/*
+ * This optimizer convert query of form:
+ *  SELECT a1, a2,..., an, F1(b1), F2(b2), F3(b3), ...., Fm(bm), F(distinct c) FROM Table GROUP BY a1, a2, ..., an
+ *
+ *  INTO
+ *  SELECT a1, a2,..., an, arbitrary(f1 if group = 0 else null),...., arbitrary(fm if group = 0 else null), F(c if group = 1 else null) FROM
+ *      SELECT a1, a2,..., an, F1(b1) as f1, F2(b2) as f2,...., Fm(bm) as fm, c, group FROM
+ *        SELECT a1, a2,..., an, b1, b2, ... ,bn, c FROM Table GROUP BY GROUPING SETS ((a1, a2,..., an, b1, b2, ... ,bn), (a1, a2,..., an, c))
+ *      GROUP BY a1, a2,..., an, c, group
+ *  GROUP BY a1, a2,..., an
+ */
 public class DistinctOptimizer
         implements PlanOptimizer
 {
@@ -105,7 +114,10 @@ public class DistinctOptimizer
                 return context.defaultRewrite(node, Optional.empty());
             }
 
-            AggregateInfo aggregateInfo = new AggregateInfo(node.getGroupBy(), Iterables.getOnlyElement(masks), node.getAggregations(), node.getFunctions());
+            AggregateInfo aggregateInfo = new AggregateInfo(node.getGroupBy(),
+                    Iterables.getOnlyElement(masks),
+                    node.getAggregations(),
+                    node.getFunctions());
 
             PlanNode source = context.rewrite(node.getSource(), Optional.of(aggregateInfo));
 
@@ -149,9 +161,6 @@ public class DistinctOptimizer
         @Override
         public PlanNode visitMarkDistinct(MarkDistinctNode node, RewriteContext<Optional<AggregateInfo>> context)
         {
-            /*
-             * 1. Get outputSymbols of source. Source will be project, we get the outputSymbols
-             */
             Optional<AggregateInfo> aggregateInfo = context.get();
             // presence of aggregateInfo => mask also present
             if (aggregateInfo.isPresent() && aggregateInfo.get().getMask().get().equals(node.getMarkerSymbol())) {
@@ -168,7 +177,7 @@ public class DistinctOptimizer
                 Symbol distinctSymbolForNonDistinctAggregates = distinctSymbol;
                 allSymbols.add(distinctSymbol);
 
-                // If non-distinct aggregation on same symbol which had distinct mask, add new block
+                // If same symbol in distinct and non-distinct aggregations
                 if (nonDistinctAggregateSymbols.contains(distinctSymbol)) {
                     Symbol newSymbol = symbolAllocator.newSymbol(distinctSymbol.getName(), symbolAllocator.getTypes().get(distinctSymbol));
                     nonDistinctAggregateSymbols.set(nonDistinctAggregateSymbols.indexOf(distinctSymbol), newSymbol);
@@ -191,7 +200,7 @@ public class DistinctOptimizer
 
                 List<List<Symbol>> groups = new ArrayList<>();
                 // g0 = {allGBY_Symbols + allNonDistinctAggregateSymbols}
-                // g1 = {allGBY_Symbols + first Distinct Symbol}
+                // g1 = {allGBY_Symbols + Distinct Symbol}
                 // symbols present in Group_i will be set, rest will be Null
 
                 //g0
@@ -223,7 +232,7 @@ public class DistinctOptimizer
                 /*
                  * The new AggregateNode now aggregates on the symbols that original AggregationNode did
                  * original one will now aggregate on the output symbols of this new node
-                 * This map stores the mapping of such symbols, new maps is as follows
+                 * nonDistinctAggregationSymbolMapBuilder stores the mapping of such symbols, new maps is as follows
                  * key = output symbol of new aggregation
                  * value = output symbol of corresponding aggregation of original AggregationNode
                  */
@@ -262,7 +271,7 @@ public class DistinctOptimizer
                 AggregationNode aggregationNode = new AggregationNode(idAllocator.getNextId(),
                         groupIdNode,
                         groupByKeys,
-                        aggregations.build(), // aggregations using same args but output symbol different
+                        aggregations.build(),
                         functions.build(),
                         Collections.emptyMap(),
                         ImmutableList.of(groupByKeys),
@@ -272,17 +281,13 @@ public class DistinctOptimizer
                         node.getHashSymbol());
 
                 /*
-                 * 3. Add new project node that adds if expression
-                 *   if aggregate on distinct
-                 *      new aggregate = aggregate (if g = 1 then aggregateInputSymbol else null)
-                 *   else
-                 *      new aggregate = aggregate(if g = 0 then aggregateInputSymbol else null)
+                 * 3. Add new project node that adds if expressions
                  *
                  * This Project is useful for cases when we aggregate on distinct and non-distinct values of same sybol, eg:
                  *  select a, sum(b), count(c), sum(distinct c) group by a
                  * Without this Project, we would count additional values for count(c)
                  */
-                Map<Symbol, Symbol> nonDistinctAggregationsSymboMap = nonDistinctAggregationSymbolMapBuilder.build();
+                Map<Symbol, Symbol> nonDistinctAggregationSymbolMap = nonDistinctAggregationSymbolMapBuilder.build();
                 ImmutableMap.Builder<Symbol, Expression> outputSymbols = ImmutableMap.builder();
 
                 // maps of old to new symbols
@@ -302,9 +307,9 @@ public class DistinctOptimizer
                                 symbol.toSymbolReference());
                         outputSymbols.put(newSymbol, expression);
                     }
-                    else if (nonDistinctAggregationsSymboMap.containsKey(symbol)) {
+                    else if (nonDistinctAggregationSymbolMap.containsKey(symbol)) {
                         Symbol newSymbol = symbolAllocator.newSymbol("expr", symbolAllocator.getTypes().get(symbol));
-                        outputNonDistinctAggregateSymbols.put(nonDistinctAggregationsSymboMap.get(symbol), newSymbol); // key of this map is key of an aggregatio in AggrNode above, it will now aggregate on this Map's value
+                        outputNonDistinctAggregateSymbols.put(nonDistinctAggregationSymbolMap.get(symbol), newSymbol); // key of this map is key of an aggregation in AggrNode above, it will now aggregate on this Map's value
                         Expression expression = createIfExpression(groupSymbol.toSymbolReference(),
                                 new Cast(new LongLiteral("0"), "bigint"),
                                 ComparisonExpression.Type.EQUAL,
@@ -324,9 +329,6 @@ public class DistinctOptimizer
                 aggregateInfo.get().setNewNonDistinctAggregateSymbols(outputNonDistinctAggregateSymbols.build());
                 aggregateInfo.get().setNewDistinctAggregateSymbols(outputDistinctAggregateSymbols.build());
 
-                // This project node is useful when previous aggregation node calculated a value for injected null values
-                // e.g. count function would have resulted in 0 for null value, but another count over this would return 1
-                // this Project node sets these values back to null
                 return new ProjectNode(idAllocator.getNextId(),
                         aggregationNode,
                         outputSymbols.build());
@@ -345,23 +347,6 @@ public class DistinctOptimizer
         {
             return new WhenClause(new ComparisonExpression(type, left, right),
                     result);
-        }
-
-        // below methods from HashGenerationOptimizer with slight modification
-        private static Expression getHashFunctionCall(Expression previousHashValue, Symbol symbol)
-        {
-            FunctionCall functionCall = new FunctionCall(
-                    QualifiedName.of(HASH_CODE),
-                    Optional.empty(),
-                    false,
-                    ImmutableList.of(symbol.toSymbolReference()));
-            List<Expression> arguments = ImmutableList.of(previousHashValue, orNullHashCode(functionCall));
-            return new FunctionCall(QualifiedName.of("combine_hash"), arguments);
-        }
-
-        private static Expression orNullHashCode(Expression expression)
-        {
-            return new CoalesceExpression(expression, new LongLiteral(String.valueOf(TypeUtils.NULL_HASH_CODE)));
         }
     }
 
