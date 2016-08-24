@@ -47,6 +47,7 @@ public class FeaturesConfig
     private boolean optimizeSingleDistinct = true;
     private boolean pushTableWriteThroughUnion = true;
     private boolean legacyArrayAgg;
+    private boolean optimizeDistinctAggregations;
 
     private String processingOptimization = ProcessingOptimization.DISABLED;
     private boolean dictionaryAggregation;
@@ -267,6 +268,18 @@ public class FeaturesConfig
     public FeaturesConfig setRegexLibrary(RegexLibrary regexLibrary)
     {
         this.regexLibrary = regexLibrary;
+        return this;
+    }
+
+    public boolean isOptimizeDistinctAggregations()
+    {
+        return optimizeDistinctAggregations;
+    }
+
+    @Config("optimizer.optimize-distinct-aggregations")
+    public FeaturesConfig setOptimizeDistinctAggregations(boolean optimizeDistinctAggregations)
+    {
+        this.optimizeDistinctAggregations = optimizeDistinctAggregations;
         return this;
     }
 }
