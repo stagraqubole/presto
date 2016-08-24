@@ -159,7 +159,7 @@ public class RaptorMetadata
         if (table == null) {
             return null;
         }
-        List<TableColumn> tableColumns = dao.getTableColumns(table.getTableId());
+        List<TableColumn> tableColumns = dao.listTableColumns(table.getTableId());
         checkArgument(!tableColumns.isEmpty(), "Table %s does not have any columns", tableName);
 
         RaptorColumnHandle sampleWeightColumnHandle = null;
@@ -186,7 +186,7 @@ public class RaptorMetadata
     {
         RaptorTableHandle handle = checkType(tableHandle, RaptorTableHandle.class, "tableHandle");
         SchemaTableName tableName = new SchemaTableName(handle.getSchemaName(), handle.getTableName());
-        List<ColumnMetadata> columns = dao.getTableColumns(handle.getTableId()).stream()
+        List<ColumnMetadata> columns = dao.listTableColumns(handle.getTableId()).stream()
                 .map(TableColumn::toColumnMetadata)
                 .filter(isSampleWeightColumn().negate())
                 .collect(toCollection(ArrayList::new));
@@ -241,19 +241,13 @@ public class RaptorMetadata
     @Override
     public ColumnMetadata getColumnMetadata(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle columnHandle)
     {
-        long tableId = checkType(tableHandle, RaptorTableHandle.class, "tableHandle").getTableId();
         RaptorColumnHandle column = checkType(columnHandle, RaptorColumnHandle.class, "columnHandle");
 
         if (isHiddenColumn(column.getColumnId())) {
             return hiddenColumn(column.getColumnName(), column.getColumnType());
         }
 
-        long columnId = column.getColumnId();
-        TableColumn tableColumn = dao.getTableColumn(tableId, columnId);
-        if (tableColumn == null) {
-            throw new PrestoException(NOT_FOUND, format("Column ID %s does not exist for table ID %s", columnId, tableId));
-        }
-        return tableColumn.toColumnMetadata();
+        return new ColumnMetadata(column.getColumnName(), column.getColumnType());
     }
 
     @Override
@@ -619,7 +613,7 @@ public class RaptorMetadata
 
         ImmutableList.Builder<RaptorColumnHandle> columnHandles = ImmutableList.builder();
         ImmutableList.Builder<Type> columnTypes = ImmutableList.builder();
-        for (TableColumn column : dao.getTableColumns(tableId)) {
+        for (TableColumn column : dao.listTableColumns(tableId)) {
             columnHandles.add(new RaptorColumnHandle(connectorId, column.getColumnName(), column.getColumnId(), column.getDataType()));
             columnTypes.add(column.getDataType());
         }
