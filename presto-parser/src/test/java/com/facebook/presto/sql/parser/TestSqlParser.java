@@ -67,6 +67,7 @@ import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
 import com.facebook.presto.sql.tree.NotExpression;
 import com.facebook.presto.sql.tree.NullLiteral;
+import com.facebook.presto.sql.tree.Parameter;
 import com.facebook.presto.sql.tree.Prepare;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
@@ -122,6 +123,7 @@ import static com.facebook.presto.sql.testing.TreeAssertions.assertFormattedSql;
 import static com.facebook.presto.sql.tree.ArithmeticUnaryExpression.negative;
 import static com.facebook.presto.sql.tree.ArithmeticUnaryExpression.positive;
 import static java.lang.String.format;
+import static java.util.Collections.emptyList;
 import static java.util.Collections.nCopies;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -1476,6 +1478,15 @@ public class TestSqlParser
     }
 
     @Test
+    public void testPrepareWithParameters()
+    {
+        assertStatement("PREPARE myquery FROM SELECT ?, ? FROM foo",
+                new Prepare("myquery", simpleQuery(
+                        selectList(new Parameter(0), new Parameter(1)),
+                        table(QualifiedName.of("foo")))));
+    }
+
+    @Test
     public void testDeallocatePrepare()
     {
         assertStatement("DEALLOCATE PREPARE myquery", new Deallocate("myquery"));
@@ -1484,7 +1495,14 @@ public class TestSqlParser
     @Test
     public void testExecute()
     {
-        assertStatement("EXECUTE myquery", new Execute("myquery"));
+        assertStatement("EXECUTE myquery", new Execute("myquery", emptyList()));
+    }
+
+    @Test
+    public void testExecuteWithUsing()
+    {
+        assertStatement("EXECUTE myquery USING 1, 'abc', ARRAY ['hello']",
+                new Execute("myquery", ImmutableList.of(new LongLiteral("1"), new StringLiteral("abc"), new ArrayConstructor(ImmutableList.of(new StringLiteral("hello"))))));
     }
 
     @Test
@@ -1546,8 +1564,8 @@ public class TestSqlParser
         if (!parsed.equals(expected)) {
             fail(format("expected\n\n%s\n\nto parse as\n\n%s\n\nbut was\n\n%s\n",
                     indent(input),
-                    indent(formatSql(expected)),
-                    indent(formatSql(parsed))));
+                    indent(formatSql(expected, Optional.empty())),
+                    indent(formatSql(parsed, Optional.empty()))));
         }
     }
 

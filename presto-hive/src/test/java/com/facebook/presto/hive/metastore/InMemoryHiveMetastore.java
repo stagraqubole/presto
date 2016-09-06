@@ -20,6 +20,7 @@ import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
@@ -103,7 +104,7 @@ public class InMemoryHiveMetastore
             tableCopy.setSd(new StorageDescriptor());
         }
         else if (tableCopy.getSd().getLocation() != null) {
-            File directory = new File(URI.create(tableCopy.getSd().getLocation()));
+            File directory = new File(new Path(tableCopy.getSd().getLocation()).toUri());
             checkArgument(directory.exists(), "Table directory does not exist");
             checkArgument(isParentDir(directory, baseDirectory), "Table directory must be inside of the metastore base directory");
         }
@@ -138,7 +139,7 @@ public class InMemoryHiveMetastore
     }
 
     @Override
-    public void dropTable(String databaseName, String tableName)
+    public void dropTable(String databaseName, String tableName, boolean deleteData)
     {
         List<String> locations = listAllDataPaths(this, databaseName, tableName);
 
@@ -153,11 +154,13 @@ public class InMemoryHiveMetastore
                 .forEach(partitions::remove);
 
         // remove data
-        for (String location : locations) {
-            if (location != null) {
-                File directory = new File(URI.create(location));
-                checkArgument(isParentDir(directory, baseDirectory), "Table directory must be inside of the metastore base directory");
-                deleteRecursively(directory);
+        if (deleteData) {
+            for (String location : locations) {
+                if (location != null) {
+                    File directory = new File(new Path(location).toUri());
+                    checkArgument(isParentDir(directory, baseDirectory), "Table directory must be inside of the metastore base directory");
+                    deleteRecursively(directory);
+                }
             }
         }
     }
@@ -271,7 +274,7 @@ public class InMemoryHiveMetastore
     }
 
     @Override
-    public void dropPartition(String databaseName, String tableName, List<String> parts)
+    public void dropPartition(String databaseName, String tableName, List<String> parts, boolean deleteData)
     {
         for (Entry<PartitionName, Partition> entry : partitions.entrySet()) {
             PartitionName partitionName = entry.getKey();
@@ -280,6 +283,17 @@ public class InMemoryHiveMetastore
                 partitions.remove(partitionName);
             }
         }
+    }
+
+    @Override
+    public void alterPartition(String databaseName, String tableName, Partition partition)
+    {
+        Optional<Table> table = getTable(databaseName, tableName);
+        if (!table.isPresent()) {
+            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName));
+        }
+        String partitionName = createPartitionName(partition, table.get());
+        this.partitions.put(PartitionName.partition(databaseName, tableName, partitionName), partition);
     }
 
     @Override

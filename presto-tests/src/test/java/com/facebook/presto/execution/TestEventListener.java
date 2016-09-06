@@ -18,50 +18,65 @@ import com.facebook.presto.execution.TestEventListenerPlugin.TestingEventListene
 import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
 import com.facebook.presto.spi.eventlistener.QueryCreatedEvent;
 import com.facebook.presto.spi.eventlistener.SplitCompletedEvent;
+import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.QueryRunner;
 import com.facebook.presto.tests.DistributedQueryRunner;
 import com.facebook.presto.tpch.TpchPlugin;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.intellij.lang.annotations.Language;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static java.util.stream.Collectors.toSet;
 import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
 
+@Test(singleThreaded = true)
 public class TestEventListener
 {
+    private static final int SPLITS_PER_NODE = 3;
+    private final EventsBuilder generatedEvents = new EventsBuilder();
+
     private QueryRunner queryRunner;
     private Session session;
 
-    private EventsBuilder generateEvents(@Language("SQL") String sql)
+    @BeforeClass
+    private void setUp()
             throws Exception
     {
-        EventsBuilder generatedEvents = new EventsBuilder();
-
-        try {
-            queryRunner = new DistributedQueryRunner(testSessionBuilder().build(), 1);
-            queryRunner.installPlugin(new TpchPlugin());
-            queryRunner.installPlugin(new TestingEventListenerPlugin(generatedEvents));
-            queryRunner.createCatalog("tpch", "tpch", ImmutableMap.of());
-        }
-        catch (Exception e) {
-            queryRunner.close();
-            throw e;
-        }
-
         session = testSessionBuilder()
+                .setSystemProperties(ImmutableMap.of("task_concurrency", "1"))
                 .setCatalog("tpch")
                 .setSchema("tiny")
                 .build();
+        queryRunner = new DistributedQueryRunner(session, 1);
+        queryRunner.installPlugin(new TpchPlugin());
+        queryRunner.installPlugin(new TestingEventListenerPlugin(generatedEvents));
+        queryRunner.createCatalog("tpch", "tpch", ImmutableMap.of("tpch.splits-per-node", Integer.toString(SPLITS_PER_NODE)));
+    }
 
-        queryRunner.execute(session, sql);
+    @AfterClass(alwaysRun = true)
+    private void tearDown()
+    {
         queryRunner.close();
+    }
+
+    private EventsBuilder generateEvents(@Language("SQL") String sql, int numEventsExpected)
+            throws Exception
+    {
+        generatedEvents.initialize(numEventsExpected);
+        queryRunner.execute(session, sql);
+        generatedEvents.waitForEvents(10);
 
         return generatedEvents;
     }
@@ -70,61 +85,103 @@ public class TestEventListener
     public void testConstantQuery()
             throws Exception
     {
-        EventsBuilder events = generateEvents("SELECT 1");
+        // QueryCreated: 1, QueryCompleted: 1, Splits: 1
+        EventsBuilder events = generateEvents("SELECT 1", 3);
 
-        assertEquals(events.getQueryCreatedEvents().size(), 1);
         QueryCreatedEvent queryCreatedEvent = getOnlyElement(events.getQueryCreatedEvents());
         assertEquals(queryCreatedEvent.getContext().getEnvironment(), "testing");
         assertEquals(queryCreatedEvent.getMetadata().getQuery(), "SELECT 1");
 
-        assertEquals(events.getQueryCompletedEvents().size(), 1);
         QueryCompletedEvent queryCompletedEvent = getOnlyElement(events.getQueryCompletedEvents());
         assertEquals(queryCompletedEvent.getStatistics().getTotalRows(), 0L);
+        assertEquals(queryCreatedEvent.getMetadata().getQueryId(), queryCompletedEvent.getMetadata().getQueryId());
 
-        // TODO: make this an equality check after we fix final statistics collection
-        assertTrue(events.getSplitCompletedEvents().size() >= queryCompletedEvent.getStatistics().getCompletedSplits());
+        List<SplitCompletedEvent> splitCompletedEvents = events.getSplitCompletedEvents();
+        assertEquals(splitCompletedEvents.get(0).getQueryId(), queryCompletedEvent.getMetadata().getQueryId());
+        assertEquals(splitCompletedEvents.get(0).getStatistics().getCompletedPositions(), 1);
     }
 
     @Test
     public void testNormalQuery()
             throws Exception
     {
-        EventsBuilder events = generateEvents("SELECT sum(linenumber) FROM lineitem");
+        // We expect the following events
+        // QueryCreated: 1, QueryCompleted: 1, leaf splits: SPLITS_PER_NODE, aggregation/output split: 1
+        int expectedEvents = SPLITS_PER_NODE + 3;
+        EventsBuilder events = generateEvents("SELECT sum(linenumber) FROM lineitem", expectedEvents);
 
-        assertEquals(events.getQueryCreatedEvents().size(), 1);
         QueryCreatedEvent queryCreatedEvent = getOnlyElement(events.getQueryCreatedEvents());
         assertEquals(queryCreatedEvent.getContext().getEnvironment(), "testing");
         assertEquals(queryCreatedEvent.getMetadata().getQuery(), "SELECT sum(linenumber) FROM lineitem");
 
-        assertEquals(events.getQueryCompletedEvents().size(), 1);
         QueryCompletedEvent queryCompletedEvent = getOnlyElement(events.getQueryCompletedEvents());
         assertEquals(queryCompletedEvent.getIoMetadata().getOutput(), Optional.empty());
         assertEquals(queryCompletedEvent.getIoMetadata().getInputs().size(), 1);
         assertEquals(getOnlyElement(queryCompletedEvent.getIoMetadata().getInputs()).getConnectorId(), "tpch");
+        assertEquals(queryCreatedEvent.getMetadata().getQueryId(), queryCompletedEvent.getMetadata().getQueryId());
+        assertEquals(queryCompletedEvent.getStatistics().getCompletedSplits(), SPLITS_PER_NODE + 1);
 
-        // TODO: make this an equality check after we fix final statistics collection
-        assertTrue(events.getSplitCompletedEvents().size() >= queryCompletedEvent.getStatistics().getCompletedSplits());
+        List<SplitCompletedEvent> splitCompletedEvents = events.getSplitCompletedEvents();
+        assertEquals(splitCompletedEvents.size(), SPLITS_PER_NODE + 1); // leaf splits + aggregation split
+
+        // All splits must have the same query ID
+        Set<String> actual = splitCompletedEvents.stream()
+                .map(SplitCompletedEvent::getQueryId)
+                .collect(toSet());
+        assertEquals(actual, ImmutableSet.of(queryCompletedEvent.getMetadata().getQueryId()));
+
+        // Sum of row count processed by all leaf stages is equal to the number of rows in the table
+        long actualCompletedPositions = splitCompletedEvents.stream()
+                .filter(e -> !e.getStageId().endsWith(".0"))    // filter out the root stage
+                .mapToLong(e -> e.getStatistics().getCompletedPositions())
+                .sum();
+
+        MaterializedResult result = queryRunner.execute(session, "SELECT count(*) FROM lineitem");
+        long expectedCompletedPositions = (long) result.getMaterializedRows().get(0).getField(0);
+
+        assertEquals(actualCompletedPositions, expectedCompletedPositions);
+        assertEquals(queryCompletedEvent.getStatistics().getTotalRows(), expectedCompletedPositions);
     }
 
     static class EventsBuilder
     {
-        private final ImmutableList.Builder<QueryCreatedEvent> queryCreatedEvents = ImmutableList.builder();
-        private final ImmutableList.Builder<QueryCompletedEvent> queryCompletedEvents = ImmutableList.builder();
-        private final ImmutableList.Builder<SplitCompletedEvent> splitCompletedEvents = ImmutableList.builder();
+        private ImmutableList.Builder<QueryCreatedEvent> queryCreatedEvents;
+        private ImmutableList.Builder<QueryCompletedEvent> queryCompletedEvents;
+        private ImmutableList.Builder<SplitCompletedEvent> splitCompletedEvents;
 
-        public void addQueryCreated(QueryCreatedEvent event)
+        private CountDownLatch eventsLatch;
+
+        public synchronized void initialize(int numEvents)
+        {
+            queryCreatedEvents = ImmutableList.builder();
+            queryCompletedEvents = ImmutableList.builder();
+            splitCompletedEvents = ImmutableList.builder();
+
+            eventsLatch = new CountDownLatch(numEvents);
+        }
+
+        public void waitForEvents(int timeoutSeconds)
+                throws InterruptedException
+        {
+            eventsLatch.await(timeoutSeconds, TimeUnit.SECONDS);
+        }
+
+        public synchronized void addQueryCreated(QueryCreatedEvent event)
         {
             queryCreatedEvents.add(event);
+            eventsLatch.countDown();
         }
 
-        public void addQueryCompleted(QueryCompletedEvent event)
+        public synchronized void addQueryCompleted(QueryCompletedEvent event)
         {
             queryCompletedEvents.add(event);
+            eventsLatch.countDown();
         }
 
-        public void addSplitCompleted(SplitCompletedEvent event)
+        public synchronized void addSplitCompleted(SplitCompletedEvent event)
         {
             splitCompletedEvents.add(event);
+            eventsLatch.countDown();
         }
 
         public List<QueryCreatedEvent> getQueryCreatedEvents()

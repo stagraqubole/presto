@@ -78,7 +78,7 @@ statement
         (LIMIT limit=(INTEGER_VALUE | ALL))?                           #showPartitions
     | PREPARE identifier FROM statement                                #prepare
     | DEALLOCATE PREPARE identifier                                    #deallocate
-    | EXECUTE identifier                                               #execute
+    | EXECUTE identifier (USING expression (',' expression)*)?         #execute
     ;
 
 query
@@ -264,6 +264,7 @@ primaryExpression
     | booleanValue                                                                   #booleanLiteral
     | STRING                                                                         #stringLiteral
     | BINARY_LITERAL                                                                 #binaryLiteral
+    | '?'                                                                            #parameter
     | POSITION '(' valueExpression IN valueExpression ')'                            #position
     | '(' expression (',' expression)+ ')'                                           #rowConstructor
     | ROW '(' expression (',' expression)* ')'                                       #rowConstructor

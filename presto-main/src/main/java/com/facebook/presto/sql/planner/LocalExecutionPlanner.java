@@ -208,6 +208,7 @@ import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static java.lang.String.format;
+import static java.util.Collections.emptyList;
 import static java.util.Collections.singleton;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.IntStream.range;
@@ -668,16 +669,6 @@ public class LocalExecutionPlanner
                     .map(symbol -> node.getOrderings().get(symbol))
                     .collect(toImmutableList());
 
-            Optional<Integer> frameStartChannel = Optional.empty();
-            Optional<Integer> frameEndChannel = Optional.empty();
-            Frame frame = node.getFrame();
-            if (frame.getStartValue().isPresent()) {
-                frameStartChannel = Optional.of(source.getLayout().get(frame.getStartValue().get()));
-            }
-            if (frame.getEndValue().isPresent()) {
-                frameEndChannel = Optional.of(source.getLayout().get(frame.getEndValue().get()));
-            }
-
             ImmutableList.Builder<Integer> outputChannels = ImmutableList.builder();
             for (int i = 0; i < source.getTypes().size(); i++) {
                 outputChannels.add(i);
@@ -685,22 +676,35 @@ public class LocalExecutionPlanner
 
             ImmutableList.Builder<WindowFunctionDefinition> windowFunctionsBuilder = ImmutableList.builder();
             ImmutableList.Builder<Symbol> windowFunctionOutputSymbolsBuilder = ImmutableList.builder();
-            for (Map.Entry<Symbol, FunctionCall> entry : node.getWindowFunctions().entrySet()) {
+            for (Map.Entry<Symbol, WindowNode.Function> entry : node.getWindowFunctions().entrySet()) {
+                Optional<Integer> frameStartChannel = Optional.empty();
+                Optional<Integer> frameEndChannel = Optional.empty();
+
+                Frame frame = entry.getValue().getFrame();
+                if (frame.getStartValue().isPresent()) {
+                    frameStartChannel = Optional.of(source.getLayout().get(frame.getStartValue().get()));
+                }
+                if (frame.getEndValue().isPresent()) {
+                    frameEndChannel = Optional.of(source.getLayout().get(frame.getEndValue().get()));
+                }
+
+                FrameInfo frameInfo = new FrameInfo(frame.getType(), frame.getStartType(), frameStartChannel, frame.getEndType(), frameEndChannel);
+
+                FunctionCall functionCall = entry.getValue().getFunctionCall();
+                Signature signature = entry.getValue().getSignature();
                 ImmutableList.Builder<Integer> arguments = ImmutableList.builder();
-                for (Expression argument : entry.getValue().getArguments()) {
+                for (Expression argument : functionCall.getArguments()) {
                     Symbol argumentSymbol = Symbol.from(argument);
                     arguments.add(source.getLayout().get(argumentSymbol));
                 }
                 Symbol symbol = entry.getKey();
-                Signature signature = node.getSignatures().get(symbol);
                 WindowFunctionSupplier windowFunctionSupplier = metadata.getFunctionRegistry().getWindowFunctionImplementation(signature);
                 Type type = metadata.getType(signature.getReturnType());
-                windowFunctionsBuilder.add(window(windowFunctionSupplier, type, arguments.build()));
+                windowFunctionsBuilder.add(window(windowFunctionSupplier, type, frameInfo, arguments.build()));
                 windowFunctionOutputSymbolsBuilder.add(symbol);
             }
 
             List<Symbol> windowFunctionOutputSymbols = windowFunctionOutputSymbolsBuilder.build();
-            List<WindowFunctionDefinition> windowFunctions = windowFunctionsBuilder.build();
 
             // compute the layout of the output from the window operator
             ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
@@ -720,13 +724,12 @@ public class LocalExecutionPlanner
                     node.getId(),
                     source.getTypes(),
                     outputChannels.build(),
-                    windowFunctions,
+                    windowFunctionsBuilder.build(),
                     partitionChannels,
                     preGroupedChannels,
                     sortChannels,
                     sortOrder,
                     node.getPreSortedOrderPrefix(),
-                    new FrameInfo(frame.getType(), frame.getStartType(), frameStartChannel, frame.getEndType(), frameEndChannel),
                     10_000);
 
             return new PhysicalOperation(operatorFactory, outputMappings.build(), source);
@@ -997,7 +1000,8 @@ public class LocalExecutionPlanner
                     metadata,
                     sqlParser,
                     sourceTypes,
-                    concat(singleton(rewrittenFilter), rewrittenProjections));
+                    concat(singleton(rewrittenFilter), rewrittenProjections),
+                    emptyList());
 
             RowExpression translatedFilter = toRowExpression(rewrittenFilter, expressionTypes);
             List<RowExpression> translatedProjections = rewrittenProjections.stream()
@@ -1149,7 +1153,8 @@ public class LocalExecutionPlanner
                         metadata,
                         sqlParser,
                         ImmutableMap.<Symbol, Type>of(),
-                        ImmutableList.copyOf(row));
+                        ImmutableList.copyOf(row),
+                        emptyList());
                 for (int i = 0; i < row.size(); i++) {
                     // evaluate the literal value
                     Object result = ExpressionInterpreter.expressionInterpreter(row.get(i), metadata, context.getSession(), expressionTypes).evaluate(0);
@@ -1701,9 +1706,7 @@ public class LocalExecutionPlanner
         {
             PhysicalOperation source = node.getSource().accept(this, context);
 
-            List<Type> types = node.getOutputSymbols().stream()
-                    .map(symbol -> requireNonNull(context.getTypes().get(symbol), format("No type for symbol %s", symbol)))
-                    .collect(toImmutableList());
+            List<Type> types = getSourceOperatorTypes(node, context.getTypes());
 
             OperatorFactory operatorFactory = new EnforceSingleRowOperator.EnforceSingleRowOperatorFactory(context.getNextOperatorId(), node.getId(), types);
             return new PhysicalOperation(operatorFactory, makeLayout(node), source);

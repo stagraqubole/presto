@@ -25,6 +25,7 @@ import com.facebook.presto.memory.VersionedMemoryPoolId;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.security.AccessControl;
 import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.split.SplitManager;
 import com.facebook.presto.sql.analyzer.Analysis;
 import com.facebook.presto.sql.analyzer.Analyzer;
@@ -44,10 +45,10 @@ import com.facebook.presto.sql.planner.StageExecutionPlan;
 import com.facebook.presto.sql.planner.SubPlan;
 import com.facebook.presto.sql.planner.optimizations.PlanOptimizer;
 import com.facebook.presto.sql.tree.Explain;
+import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.transaction.TransactionManager;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
 import io.airlift.concurrent.SetThreadName;
 import io.airlift.units.Duration;
 
@@ -92,9 +93,9 @@ public final class SqlQueryExecution
 
     private final QueryExplainer queryExplainer;
     private final AtomicReference<SqlQueryScheduler> queryScheduler = new AtomicReference<>();
-    private final AtomicReference<QueryInfo> finalQueryInfo = new AtomicReference<>();
     private final NodeTaskMap nodeTaskMap;
     private final ExecutionPolicy executionPolicy;
+    private final List<Expression> parameters;
 
     public SqlQueryExecution(QueryId queryId,
             String query,
@@ -116,7 +117,8 @@ public final class SqlQueryExecution
             ExecutorService queryExecutor,
             NodeTaskMap nodeTaskMap,
             QueryExplainer queryExplainer,
-            ExecutionPolicy executionPolicy)
+            ExecutionPolicy executionPolicy,
+            List<Expression> parameters)
     {
         try (SetThreadName ignored = new SetThreadName("Query-%s", queryId)) {
             this.statement = requireNonNull(statement, "statement is null");
@@ -133,6 +135,7 @@ public final class SqlQueryExecution
             this.nodeTaskMap = requireNonNull(nodeTaskMap, "nodeTaskMap is null");
             this.executionPolicy = requireNonNull(executionPolicy, "executionPolicy is null");
             this.queryExplainer = requireNonNull(queryExplainer, "queryExplainer is null");
+            this.parameters = requireNonNull(parameters);
 
             checkArgument(scheduleSplitBatchSize > 0, "scheduleSplitBatchSize must be greater than 0");
             this.scheduleSplitBatchSize = scheduleSplitBatchSize;
@@ -179,9 +182,9 @@ public final class SqlQueryExecution
         // state change listener sets finalQueryInfo and then clears outputStage when
         // the query finishes.
         SqlQueryScheduler scheduler = queryScheduler.get();
-        QueryInfo queryInfo = finalQueryInfo.get();
-        if (queryInfo != null) {
-            return queryInfo.getQueryStats().getTotalMemoryReservation().toBytes();
+        Optional<QueryInfo> finalQueryInfo = stateMachine.getFinalQueryInfo();
+        if (finalQueryInfo.isPresent()) {
+            return finalQueryInfo.get().getQueryStats().getTotalMemoryReservation().toBytes();
         }
         if (scheduler == null) {
             return 0;
@@ -193,9 +196,9 @@ public final class SqlQueryExecution
     public Duration getTotalCpuTime()
     {
         SqlQueryScheduler scheduler = queryScheduler.get();
-        QueryInfo queryInfo = finalQueryInfo.get();
-        if (queryInfo != null) {
-            return queryInfo.getQueryStats().getTotalCpuTime();
+        Optional<QueryInfo> finalQueryInfo = stateMachine.getFinalQueryInfo();
+        if (finalQueryInfo.isPresent()) {
+            return finalQueryInfo.get().getQueryStats().getTotalCpuTime();
         }
         if (scheduler == null) {
             return new Duration(0, SECONDS);
@@ -254,6 +257,12 @@ public final class SqlQueryExecution
         }
     }
 
+    @Override
+    public void addFinalQueryInfoListener(StateChangeListener<QueryInfo> stateChangeListener)
+    {
+        stateMachine.addQueryInfoStateChangeListener(stateChangeListener);
+    }
+
     private PlanRoot analyzeQuery()
     {
         try {
@@ -270,7 +279,7 @@ public final class SqlQueryExecution
         long analysisStart = System.nanoTime();
 
         // analyze query
-        Analyzer analyzer = new Analyzer(stateMachine.getSession(), metadata, sqlParser, accessControl, Optional.of(queryExplainer), experimentalSyntaxEnabled);
+        Analyzer analyzer = new Analyzer(stateMachine.getSession(), metadata, sqlParser, accessControl, Optional.of(queryExplainer), experimentalSyntaxEnabled, parameters);
         Analysis analysis = analyzer.analyze(statement);
 
         stateMachine.setUpdateType(analysis.getUpdateType());
@@ -391,48 +400,7 @@ public final class SqlQueryExecution
     @Override
     public void pruneInfo()
     {
-        QueryInfo queryInfo = finalQueryInfo.get();
-        if (queryInfo == null || !queryInfo.getOutputStage().isPresent()) {
-            return;
-        }
-
-        StageInfo outputStage = queryInfo.getOutputStage().get();
-        StageInfo prunedOutputStage = new StageInfo(
-                outputStage.getStageId(),
-                outputStage.getState(),
-                outputStage.getSelf(),
-                null, // Remove the plan
-                outputStage.getTypes(),
-                outputStage.getStageStats(),
-                ImmutableList.of(), // Remove the tasks
-                ImmutableList.of(), // Remove the substages
-                outputStage.getFailureCause()
-        );
-
-        QueryInfo prunedQueryInfo = new QueryInfo(
-                queryInfo.getQueryId(),
-                queryInfo.getSession(),
-                queryInfo.getState(),
-                getMemoryPool().getId(),
-                queryInfo.isScheduled(),
-                queryInfo.getSelf(),
-                queryInfo.getFieldNames(),
-                queryInfo.getQuery(),
-                queryInfo.getQueryStats(),
-                queryInfo.getSetSessionProperties(),
-                queryInfo.getResetSessionProperties(),
-                queryInfo.getAddedPreparedStatements(),
-                queryInfo.getDeallocatedPreparedStatements(),
-                queryInfo.getStartedTransactionId(),
-                queryInfo.isClearTransactionId(),
-                queryInfo.getUpdateType(),
-                Optional.of(prunedOutputStage),
-                queryInfo.getFailureInfo(),
-                queryInfo.getErrorCode(),
-                queryInfo.getInputs(),
-                queryInfo.getOutput()
-        );
-        finalQueryInfo.compareAndSet(queryInfo, prunedQueryInfo);
+        stateMachine.pruneQueryInfo();
     }
 
     @Override
@@ -450,9 +418,9 @@ public final class SqlQueryExecution
             // the query finishes.
             SqlQueryScheduler scheduler = queryScheduler.get();
 
-            QueryInfo finalQueryInfo = this.finalQueryInfo.get();
-            if (finalQueryInfo != null) {
-                return finalQueryInfo;
+            Optional<QueryInfo> finalQueryInfo = stateMachine.getFinalQueryInfo();
+            if (finalQueryInfo.isPresent()) {
+                return finalQueryInfo.get();
             }
 
             return buildQueryInfo(scheduler);
@@ -472,11 +440,9 @@ public final class SqlQueryExecution
             stageInfo = Optional.ofNullable(scheduler.getStageInfo());
         }
 
-        QueryInfo queryInfo = stateMachine.getQueryInfo(stageInfo);
-
+        QueryInfo queryInfo = stateMachine.updateQueryInfo(stageInfo);
         if (queryInfo.isFinalQueryInfo()) {
             // capture the final query state and drop reference to the scheduler
-            finalQueryInfo.compareAndSet(null, queryInfo);
             queryScheduler.set(null);
         }
 
@@ -565,7 +531,7 @@ public final class SqlQueryExecution
         }
 
         @Override
-        public SqlQueryExecution createQueryExecution(QueryId queryId, String query, Session session, Statement statement)
+        public SqlQueryExecution createQueryExecution(QueryId queryId, String query, Session session, Statement statement, List<Expression> parameters)
         {
             String executionPolicyName = SystemSessionProperties.getExecutionPolicy(session);
             ExecutionPolicy executionPolicy = executionPolicies.get(executionPolicyName);
@@ -592,7 +558,8 @@ public final class SqlQueryExecution
                     executor,
                     nodeTaskMap,
                     queryExplainer,
-                    executionPolicy);
+                    executionPolicy,
+                    parameters);
         }
     }
 }

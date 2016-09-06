@@ -16,6 +16,7 @@ package com.facebook.presto.server;
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.connector.ConnectorManager;
 import com.facebook.presto.eventlistener.EventListenerManager;
+import com.facebook.presto.execution.resourceGroups.ResourceGroupManager;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.security.AccessControlManager;
 import com.facebook.presto.spi.Plugin;
@@ -24,6 +25,7 @@ import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
 import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.facebook.presto.spi.connector.ConnectorFactoryContext;
 import com.facebook.presto.spi.eventlistener.EventListenerFactory;
+import com.facebook.presto.spi.resourceGroups.ResourceGroupConfigurationManagerFactory;
 import com.facebook.presto.spi.security.SystemAccessControlFactory;
 import com.facebook.presto.spi.type.ParametricType;
 import com.facebook.presto.spi.type.Type;
@@ -64,23 +66,19 @@ import static java.util.Objects.requireNonNull;
 @ThreadSafe
 public class PluginManager
 {
-    private static final List<String> HIDDEN_CLASSES = ImmutableList.<String>builder()
-            .add("com.fasterxml.jackson")
-            .add("org.slf4j")
-            .build();
-
-    private static final ImmutableList<String> PARENT_FIRST_CLASSES = ImmutableList.<String>builder()
-            .add("com.facebook.presto")
-            .add("com.fasterxml.jackson.annotation")
-            .add("io.airlift.slice")
-            .add("javax.annotation")
-            .add("java.")
+    private static final ImmutableList<String> SPI_PACKAGES = ImmutableList.<String>builder()
+            .add("com.facebook.presto.spi.")
+            .add("com.fasterxml.jackson.annotation.")
+            .add("io.airlift.slice.")
+            .add("io.airlift.units.")
+            .add("org.openjdk.jol.")
             .build();
 
     private static final Logger log = Logger.get(PluginManager.class);
 
     private final ConnectorManager connectorManager;
     private final Metadata metadata;
+    private final ResourceGroupManager resourceGroupManager;
     private final AccessControlManager accessControlManager;
     private final EventListenerManager eventListenerManager;
     private final BlockEncodingManager blockEncodingManager;
@@ -101,6 +99,7 @@ public class PluginManager
             ConnectorManager connectorManager,
             ConfigurationFactory configurationFactory,
             Metadata metadata,
+            ResourceGroupManager resourceGroupManager,
             AccessControlManager accessControlManager,
             EventListenerManager eventListenerManager,
             BlockEncodingManager blockEncodingManager,
@@ -129,6 +128,7 @@ public class PluginManager
 
         this.connectorManager = requireNonNull(connectorManager, "connectorManager is null");
         this.metadata = requireNonNull(metadata, "metadata is null");
+        this.resourceGroupManager = requireNonNull(resourceGroupManager, "resourceGroupManager is null");
         this.accessControlManager = requireNonNull(accessControlManager, "accessControlManager is null");
         this.eventListenerManager = requireNonNull(eventListenerManager, "eventListenerManager is null");
         this.blockEncodingManager = requireNonNull(blockEncodingManager, "blockEncodingManager is null");
@@ -224,6 +224,11 @@ public class PluginManager
             metadata.addFunctions(extractFunctions(functionClass));
         }
 
+        for (ResourceGroupConfigurationManagerFactory configurationManagerFactory : plugin.getResourceGroupConfigurationManagerFactories()) {
+            log.info("Registering resource group configuration manager %s", configurationManagerFactory.getName());
+            resourceGroupManager.addConfigurationManagerFactory(configurationManagerFactory);
+        }
+
         for (SystemAccessControlFactory accessControlFactory : plugin.getSystemAccessControlFactories()) {
             log.info("Registering system access control %s", accessControlFactory.getName());
             accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -302,7 +307,7 @@ public class PluginManager
     private URLClassLoader createClassLoader(List<URL> urls)
     {
         ClassLoader parent = getClass().getClassLoader();
-        return new PluginClassLoader(urls, parent, HIDDEN_CLASSES, PARENT_FIRST_CLASSES);
+        return new PluginClassLoader(urls, parent, SPI_PACKAGES);
     }
 
     private static List<File> listFiles(File installedPluginsDir)

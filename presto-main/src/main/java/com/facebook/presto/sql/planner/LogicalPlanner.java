@@ -70,6 +70,11 @@ import static java.util.Objects.requireNonNull;
 
 public class LogicalPlanner
 {
+    public enum Stage
+    {
+        CREATED, OPTIMIZED, OPTIMIZED_AND_VALIDATED
+    }
+
     private final PlanNodeIdAllocator idAllocator;
 
     private final Session session;
@@ -99,20 +104,29 @@ public class LogicalPlanner
 
     public Plan plan(Analysis analysis)
     {
+        return plan(analysis, Stage.OPTIMIZED_AND_VALIDATED);
+    }
+
+    public Plan plan(Analysis analysis, Stage stage)
+    {
         PlanNode root = planStatement(analysis, analysis.getStatement());
 
-        for (PlanOptimizer optimizer : planOptimizers) {
-            root = optimizer.optimize(root, session, symbolAllocator.getTypes(), symbolAllocator, idAllocator);
-            requireNonNull(root, format("%s returned a null plan", optimizer.getClass().getName()));
+        if (stage.ordinal() >= Stage.OPTIMIZED.ordinal()) {
+            for (PlanOptimizer optimizer : planOptimizers) {
+                root = optimizer.optimize(root, session, symbolAllocator.getTypes(), symbolAllocator, idAllocator);
+                requireNonNull(root, format("%s returned a null plan", optimizer.getClass().getName()));
+            }
         }
 
-        // make sure we produce a valid plan after optimizations run. This is mainly to catch programming errors
-        PlanSanityChecker.validate(root, session, metadata, sqlParser, symbolAllocator.getTypes());
+        if (stage.ordinal() >= Stage.OPTIMIZED_AND_VALIDATED.ordinal()) {
+            // make sure we produce a valid plan after optimizations run. This is mainly to catch programming errors
+            PlanSanityChecker.validate(root, session, metadata, sqlParser, symbolAllocator.getTypes());
+        }
 
         return new Plan(root, symbolAllocator);
     }
 
-    private PlanNode planStatement(Analysis analysis, Statement statement)
+    public PlanNode planStatement(Analysis analysis, Statement statement)
     {
         if (statement instanceof CreateTableAsSelect) {
             checkState(analysis.getCreateTableDestination().isPresent(), "Table destination is missing");
@@ -158,7 +172,7 @@ public class LogicalPlanner
 
         RelationPlan plan = createRelationPlan(analysis, query);
 
-        TableMetadata tableMetadata = createTableMetadata(destination, getOutputTableColumns(plan), analysis.getCreateTableProperties(), plan.getSampleWeight().isPresent());
+        TableMetadata tableMetadata = createTableMetadata(destination, getOutputTableColumns(plan), analysis.getCreateTableProperties(), plan.getSampleWeight().isPresent(), analysis.getParameters());
         if (plan.getSampleWeight().isPresent() && !metadata.canCreateSampledTables(session, destination.getCatalogName())) {
             throw new PrestoException(NOT_SUPPORTED, "Cannot write sampled data to a store that doesn't support sampling");
         }
@@ -332,7 +346,7 @@ public class LogicalPlanner
                 .process(query, null);
     }
 
-    private TableMetadata createTableMetadata(QualifiedObjectName table, List<ColumnMetadata> columns, Map<String, Expression> propertyExpressions, boolean sampled)
+    private TableMetadata createTableMetadata(QualifiedObjectName table, List<ColumnMetadata> columns, Map<String, Expression> propertyExpressions, boolean sampled, List<Expression> parameters)
     {
         String owner = session.getUser();
 
@@ -340,7 +354,8 @@ public class LogicalPlanner
                 table.getCatalogName(),
                 propertyExpressions,
                 session,
-                metadata);
+                metadata,
+                parameters);
 
         ConnectorTableMetadata metadata = new ConnectorTableMetadata(table.asSchemaTableName(), columns, properties, sampled);
         // TODO: first argument should actually be connectorId

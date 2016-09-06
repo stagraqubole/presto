@@ -38,6 +38,7 @@ import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
+import com.facebook.presto.sql.planner.plan.ApplyNode;
 import com.facebook.presto.sql.planner.plan.ChildReplacer;
 import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
@@ -129,6 +130,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static java.util.Collections.emptyList;
 import static java.util.stream.Collectors.toList;
 
 public class AddExchanges
@@ -742,7 +744,13 @@ public class AddExchanges
         private boolean shouldPrune(Expression predicate, Map<Symbol, ColumnHandle> assignments, Map<ColumnHandle, NullableValue> bindings)
         {
             List<Expression> conjuncts = extractConjuncts(predicate);
-            IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypes(session, metadata, parser, symbolAllocator.getTypes(), predicate);
+            IdentityHashMap<Expression, Type> expressionTypes = getExpressionTypes(
+                    session,
+                    metadata,
+                    parser,
+                    symbolAllocator.getTypes(),
+                    predicate,
+                    emptyList() /* parameters already replaced */);
 
             LookupSymbolResolver inputs = new LookupSymbolResolver(assignments, bindings);
 
@@ -1224,6 +1232,20 @@ public class AddExchanges
                     ActualProperties.builder()
                             .global(singleStreamPartition())
                             .build());
+        }
+
+        @Override
+        public PlanWithProperties visitApply(ApplyNode node, Context context)
+        {
+            PlanWithProperties input = node.getInput().accept(this, context);
+            PlanWithProperties subquery = node.getSubquery().accept(this, context);
+
+            ApplyNode rewritten = new ApplyNode(
+                    node.getId(),
+                    input.getNode(),
+                    subquery.getNode(),
+                    node.getCorrelation());
+            return new PlanWithProperties(rewritten, deriveProperties(rewritten, ImmutableList.of(input.getProperties(), subquery.getProperties())));
         }
 
         private PlanWithProperties planChild(PlanNode node, Context context)

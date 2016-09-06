@@ -22,9 +22,9 @@ import com.facebook.presto.sql.tree.FunctionCall;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 
-import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
@@ -39,31 +39,30 @@ final class WindowMatcher
     }
 
     @Override
-    public boolean matches(PlanNode node, Session session, Metadata metadata, SymbolAliases symbolAliases)
+    public boolean matches(PlanNode node, Session session, Metadata metadata, ExpressionAliases expressionAliases)
     {
         if (!(node instanceof WindowNode)) {
             return false;
         }
 
         WindowNode windowNode = (WindowNode) node;
-        Collection<FunctionCall> actualCalls = windowNode.getWindowFunctions().values();
+        LinkedList<FunctionCall> actualCalls = windowNode.getWindowFunctions().values().stream()
+                .map(WindowNode.Function::getFunctionCall)
+                .collect(Collectors.toCollection(LinkedList::new));
 
         if (actualCalls.size() != functionCalls.size()) {
             return false;
         }
 
-        LinkedList<FunctionCall> expectedCalls = new LinkedList<>(functionCalls);
-        LinkedList<FunctionCall> actualCopy = new LinkedList<>(actualCalls);
-
-        for (FunctionCall expectedCall : expectedCalls) {
-            if (!actualCopy.remove(expectedCall)) {
+        for (FunctionCall expectedCall : functionCalls) {
+            if (!actualCalls.remove(expectedCall)) {
                 // Found an expectedCall not in expectedCalls.
                 return false;
             }
         }
 
         // expectedCalls was missing something in actualCalls.
-        return actualCopy.isEmpty();
+        return actualCalls.isEmpty();
     }
 
     @Override

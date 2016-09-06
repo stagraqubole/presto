@@ -20,6 +20,7 @@ import com.facebook.presto.memory.VersionedMemoryPoolId;
 import com.facebook.presto.operator.BlockedReason;
 import com.facebook.presto.spi.ErrorCode;
 import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.facebook.presto.sql.planner.plan.TableScanNode;
 import com.facebook.presto.transaction.TransactionId;
@@ -116,6 +117,7 @@ public class QueryStateMachine
 
     private final AtomicReference<Set<Input>> inputs = new AtomicReference<>(ImmutableSet.of());
     private final AtomicReference<Optional<Output>> output = new AtomicReference<>(Optional.empty());
+    private final StateMachine<Optional<QueryInfo>> finalQueryInfo;
 
     private QueryStateMachine(QueryId queryId, String query, Session session, URI self, boolean autoCommit, TransactionManager transactionManager, Executor executor)
     {
@@ -127,6 +129,7 @@ public class QueryStateMachine
         this.transactionManager = requireNonNull(transactionManager, "transactionManager is null");
 
         this.queryState = new StateMachine<>("query " + query, executor, QUEUED, TERMINAL_QUERY_STATES);
+        this.finalQueryInfo = new StateMachine<>("finalQueryInfo-" + queryId, executor, Optional.empty());
     }
 
     /**
@@ -220,7 +223,7 @@ public class QueryStateMachine
         // don't report failure info is query is marked as success
         FailureInfo failureInfo = null;
         ErrorCode errorCode = null;
-        if (state != FINISHED) {
+        if (state == FAILED) {
             ExecutionFailureInfo failureCause = this.failureCause.get();
             if (failureCause != null) {
                 failureInfo = failureCause.toFailureInfo();
@@ -258,6 +261,7 @@ public class QueryStateMachine
         boolean fullyBlocked = rootStage.isPresent();
         Set<BlockedReason> blockedReasons = new HashSet<>();
 
+        boolean completeInfo = true;
         for (StageInfo stageInfo : getAllStages(rootStage)) {
             StageStats stageStats = stageInfo.getStageStats();
             totalTasks += stageStats.getTotalTasks();
@@ -290,6 +294,7 @@ public class QueryStateMachine
                 processedInputDataSize += stageStats.getProcessedInputDataSize().toBytes();
                 processedInputPositions += stageStats.getProcessedInputPositions();
             }
+            completeInfo = completeInfo && stageInfo.isCompleteInfo();
         }
 
         if (rootStage.isPresent()) {
@@ -357,7 +362,8 @@ public class QueryStateMachine
                 failureInfo,
                 errorCode,
                 inputs.get(),
-                output.get());
+                output.get(),
+                completeInfo);
     }
 
     public VersionedMemoryPoolId getMemoryPool()
@@ -531,8 +537,9 @@ public class QueryStateMachine
 
         recordDoneStats();
 
-        // NOTE: this must be set before triggering the state change, so listeners
-        // can be observe the exception
+        // NOTE: The failure cause must be set before triggering the state change, so
+        // listeners can observe the exception. This is safe because the failure cause
+        // can only be observed if the transition to FAILED is successful.
         failureCause.compareAndSet(null, toFailure(throwable));
 
         boolean failed = queryState.setIf(FAILED, currentState -> !currentState.isDone());
@@ -551,9 +558,13 @@ public class QueryStateMachine
     {
         recordDoneStats();
 
+        // NOTE: The failure cause must be set before triggering the state change, so
+        // listeners can observe the exception. This is safe because the failure cause
+        // can only be observed if the transition to FAILED is successful.
+        failureCause.compareAndSet(null, toFailure(new PrestoException(USER_CANCELED, "Query was canceled")));
+
         boolean canceled = queryState.setIf(FAILED, currentState -> !currentState.isDone());
         if (canceled) {
-            failureCause.compareAndSet(null, toFailure(new PrestoException(USER_CANCELED, "Query was canceled")));
             session.getTransactionId().ifPresent(autoCommit ? transactionManager::asyncAbort : transactionManager::fail);
         }
 
@@ -576,6 +587,18 @@ public class QueryStateMachine
     public void addStateChangeListener(StateChangeListener<QueryState> stateChangeListener)
     {
         queryState.addStateChangeListener(stateChangeListener);
+    }
+
+    public void addQueryInfoStateChangeListener(StateChangeListener<QueryInfo> stateChangeListener)
+    {
+        AtomicBoolean done = new AtomicBoolean();
+        StateChangeListener<Optional<QueryInfo>> fireOnceStateChangeListener = finalQueryInfo -> {
+            if (finalQueryInfo.isPresent() && done.compareAndSet(false, true)) {
+                stateChangeListener.stateChanged(finalQueryInfo.get());
+            }
+        };
+        finalQueryInfo.addStateChangeListener(fireOnceStateChangeListener);
+        fireOnceStateChangeListener.stateChanged(finalQueryInfo.get());
     }
 
     public Duration waitForStateChange(QueryState currentState, Duration maxWait)
@@ -607,5 +630,67 @@ public class QueryStateMachine
         return getAllStages(rootStage).stream()
                 .map(StageInfo::getState)
                 .allMatch(state -> (state == StageState.RUNNING) || state.isDone());
+    }
+
+    public Optional<QueryInfo> getFinalQueryInfo()
+    {
+        return finalQueryInfo.get();
+    }
+
+    public QueryInfo updateQueryInfo(Optional<StageInfo> stageInfo)
+    {
+        QueryInfo queryInfo = getQueryInfo(stageInfo);
+        if (queryInfo.isFinalQueryInfo()) {
+            finalQueryInfo.compareAndSet(Optional.empty(), Optional.of(queryInfo));
+        }
+        return queryInfo;
+    }
+
+    public void pruneQueryInfo()
+    {
+        Optional<QueryInfo> finalInfo = finalQueryInfo.get();
+        if (!finalInfo.isPresent() || !finalInfo.get().getOutputStage().isPresent()) {
+            return;
+        }
+
+        QueryInfo queryInfo = finalInfo.get();
+        StageInfo outputStage = queryInfo.getOutputStage().get();
+        StageInfo prunedOutputStage = new StageInfo(
+                outputStage.getStageId(),
+                outputStage.getState(),
+                outputStage.getSelf(),
+                null, // Remove the plan
+                outputStage.getTypes(),
+                outputStage.getStageStats(),
+                ImmutableList.of(), // Remove the tasks
+                ImmutableList.of(), // Remove the substages
+                outputStage.getFailureCause()
+        );
+
+        QueryInfo prunedQueryInfo = new QueryInfo(
+                queryInfo.getQueryId(),
+                queryInfo.getSession(),
+                queryInfo.getState(),
+                getMemoryPool().getId(),
+                queryInfo.isScheduled(),
+                queryInfo.getSelf(),
+                queryInfo.getFieldNames(),
+                queryInfo.getQuery(),
+                queryInfo.getQueryStats(),
+                queryInfo.getSetSessionProperties(),
+                queryInfo.getResetSessionProperties(),
+                queryInfo.getAddedPreparedStatements(),
+                queryInfo.getDeallocatedPreparedStatements(),
+                queryInfo.getStartedTransactionId(),
+                queryInfo.isClearTransactionId(),
+                queryInfo.getUpdateType(),
+                Optional.of(prunedOutputStage),
+                queryInfo.getFailureInfo(),
+                queryInfo.getErrorCode(),
+                queryInfo.getInputs(),
+                queryInfo.getOutput(),
+                queryInfo.isCompleteInfo()
+        );
+        finalQueryInfo.compareAndSet(finalInfo, Optional.of(prunedQueryInfo));
     }
 }

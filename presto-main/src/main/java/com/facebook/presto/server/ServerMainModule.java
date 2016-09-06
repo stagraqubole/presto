@@ -36,6 +36,8 @@ import com.facebook.presto.execution.TaskInfo;
 import com.facebook.presto.execution.TaskManager;
 import com.facebook.presto.execution.TaskManagerConfig;
 import com.facebook.presto.execution.TaskStatus;
+import com.facebook.presto.execution.resourceGroups.NoOpResourceGroupManager;
+import com.facebook.presto.execution.resourceGroups.ResourceGroupManager;
 import com.facebook.presto.execution.scheduler.FlatNetworkTopology;
 import com.facebook.presto.execution.scheduler.LegacyNetworkTopology;
 import com.facebook.presto.execution.scheduler.NetworkTopology;
@@ -130,12 +132,12 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.FLAT;
 import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.LEGACY;
-import static com.facebook.presto.server.ConditionalModule.conditionalModule;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.common.reflect.Reflection.newProxy;
 import static com.google.inject.multibindings.Multibinder.newSetBinder;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
+import static io.airlift.configuration.ConditionalModule.installModuleIf;
 import static io.airlift.configuration.ConfigBinder.configBinder;
 import static io.airlift.discovery.client.DiscoveryBinder.discoveryBinder;
 import static io.airlift.http.client.HttpClientBinder.httpClientBinder;
@@ -170,6 +172,8 @@ public class ServerMainModule
         }
         else {
             binder.bind(new TypeLiteral<Optional<QueryPerformanceFetcher>>(){}).toInstance(Optional.empty());
+            // Install no-op resource group manager on workers, since only coordinators manage resource groups.
+            binder.bind(ResourceGroupManager.class).to(NoOpResourceGroupManager.class).in(Scopes.SINGLETON);
 
             // HACK: this binding is needed by SystemConnectorModule, but will only be used on the coordinator
             binder.bind(QueryManager.class).toInstance(newProxy(QueryManager.class, (proxy, method, args) -> {
@@ -220,11 +224,11 @@ public class ServerMainModule
 
         // network topology
         // TODO: move to CoordinatorModule when NodeScheduler is moved
-        install(conditionalModule(
+        install(installModuleIf(
                 NodeSchedulerConfig.class,
                 config -> LEGACY.equalsIgnoreCase(config.getNetworkTopology()),
                 moduleBinder -> moduleBinder.bind(NetworkTopology.class).to(LegacyNetworkTopology.class).in(Scopes.SINGLETON)));
-        install(conditionalModule(
+        install(installModuleIf(
                 NodeSchedulerConfig.class,
                 config -> FLAT.equalsIgnoreCase(config.getNetworkTopology()),
                 moduleBinder -> moduleBinder.bind(NetworkTopology.class).to(FlatNetworkTopology.class).in(Scopes.SINGLETON)));

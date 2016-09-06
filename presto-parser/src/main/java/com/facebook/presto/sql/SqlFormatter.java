@@ -85,6 +85,7 @@ import com.google.common.collect.ImmutableSortedMap;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 import static com.facebook.presto.sql.ExpressionFormatter.formatExpression;
@@ -103,17 +104,17 @@ public final class SqlFormatter
 
     private SqlFormatter() {}
 
-    public static String formatSql(Node root)
+    public static String formatSql(Node root, Optional<List<Expression>> parameters)
     {
         StringBuilder builder = new StringBuilder();
-        new Formatter(builder, true).process(root, 0);
+        new Formatter(builder, true, parameters).process(root, 0);
         return builder.toString();
     }
 
-    public static String formatSql(Node root, boolean unmangleNames)
+    public static String formatSql(Node root, boolean unmangleNames, Optional<List<Expression>> parameters)
     {
         StringBuilder builder = new StringBuilder();
-        new Formatter(builder, unmangleNames).process(root, 0);
+        new Formatter(builder, unmangleNames, parameters).process(root, 0);
         return builder.toString();
     }
 
@@ -122,11 +123,13 @@ public final class SqlFormatter
     {
         private final StringBuilder builder;
         private final boolean unmangledNames;
+        private final Optional<List<Expression>> parameters;
 
-        public Formatter(StringBuilder builder, boolean unmangleNames)
+        public Formatter(StringBuilder builder, boolean unmangleNames, Optional<List<Expression>> parameters)
         {
             this.builder = builder;
             this.unmangledNames = unmangleNames;
+            this.parameters = parameters;
         }
 
         @Override
@@ -139,7 +142,7 @@ public final class SqlFormatter
         protected Void visitExpression(Expression node, Integer indent)
         {
             checkArgument(indent == 0, "visitExpression should only be called at root");
-            builder.append(formatExpression(node, unmangledNames));
+            builder.append(formatExpression(node, unmangledNames, parameters));
             return null;
         }
 
@@ -174,6 +177,11 @@ public final class SqlFormatter
         {
             append(indent, "EXECUTE ");
             builder.append(node.getName());
+            List<Expression> parameters = node.getParameters();
+            if (!parameters.isEmpty()) {
+                builder.append(" USING ");
+                Joiner.on(", ").appendTo(builder, parameters);
+            }
             return null;
         }
 
@@ -204,7 +212,7 @@ public final class SqlFormatter
             processRelation(node.getQueryBody(), indent);
 
             if (!node.getOrderBy().isEmpty()) {
-                append(indent, "ORDER BY " + formatSortItems(node.getOrderBy()))
+                append(indent, "ORDER BY " + formatSortItems(node.getOrderBy(), parameters))
                         .append('\n');
             }
 
@@ -237,21 +245,21 @@ public final class SqlFormatter
             builder.append('\n');
 
             if (node.getWhere().isPresent()) {
-                append(indent, "WHERE " + formatExpression(node.getWhere().get()))
+                append(indent, "WHERE " + formatExpression(node.getWhere().get(), parameters))
                         .append('\n');
             }
 
             if (node.getGroupBy().isPresent()) {
-                append(indent, "GROUP BY " + (node.getGroupBy().get().isDistinct() ? " DISTINCT " : "") + formatGroupBy(node.getGroupBy().get().getGroupingElements())).append('\n');
+                append(indent, "GROUP BY " + (node.getGroupBy().get().isDistinct() ? " DISTINCT " : "") + formatGroupBy(node.getGroupBy().get().getGroupingElements(), parameters)).append('\n');
             }
 
             if (node.getHaving().isPresent()) {
-                append(indent, "HAVING " + formatExpression(node.getHaving().get()))
+                append(indent, "HAVING " + formatExpression(node.getHaving().get(), parameters))
                         .append('\n');
             }
 
             if (!node.getOrderBy().isEmpty()) {
-                append(indent, "ORDER BY " + formatSortItems(node.getOrderBy()))
+                append(indent, "ORDER BY " + formatSortItems(node.getOrderBy(), parameters))
                         .append('\n');
             }
 
@@ -294,7 +302,7 @@ public final class SqlFormatter
         @Override
         protected Void visitSingleColumn(SingleColumn node, Integer indent)
         {
-            builder.append(formatExpression(node.getExpression()));
+            builder.append(formatExpression(node.getExpression(), parameters));
             if (node.getAlias().isPresent()) {
                 builder.append(' ')
                         .append('"')
@@ -353,9 +361,8 @@ public final class SqlFormatter
                 }
                 else if (criteria instanceof JoinOn) {
                     JoinOn on = (JoinOn) criteria;
-                    builder.append(" ON (")
-                            .append(formatExpression(on.getExpression()))
-                            .append(")");
+                    builder.append(" ON ")
+                            .append(formatExpression(on.getExpression(), parameters));
                 }
                 else if (!(criteria instanceof NaturalJoin)) {
                     throw new UnsupportedOperationException("unknown join criteria: " + criteria);
@@ -414,7 +421,7 @@ public final class SqlFormatter
                         .append(indentString(indent))
                         .append(first ? "  " : ", ");
 
-                builder.append(formatExpression(row));
+                builder.append(formatExpression(row, parameters));
                 first = false;
             }
             builder.append('\n');
@@ -628,12 +635,12 @@ public final class SqlFormatter
 
             if (node.getWhere().isPresent()) {
                 builder.append(" WHERE ")
-                        .append(formatExpression(node.getWhere().get()));
+                        .append(formatExpression(node.getWhere().get(), parameters));
             }
 
             if (!node.getOrderBy().isEmpty()) {
                 builder.append(" ORDER BY ")
-                        .append(formatSortItems(node.getOrderBy()));
+                        .append(formatSortItems(node.getOrderBy(), parameters));
             }
 
             if (node.getLimit().isPresent()) {
@@ -668,7 +675,7 @@ public final class SqlFormatter
 
             if (node.getWhere().isPresent()) {
                 builder.append(" WHERE ")
-                        .append(formatExpression(node.getWhere().get()));
+                        .append(formatExpression(node.getWhere().get(), parameters));
             }
 
             return null;
@@ -686,7 +693,7 @@ public final class SqlFormatter
             if (!node.getProperties().isEmpty()) {
                 builder.append(" WITH (");
                 Joiner.on(", ").appendTo(builder, transform(node.getProperties().entrySet(),
-                        entry -> entry.getKey() + " = " + formatExpression(entry.getValue())));
+                        entry -> entry.getKey() + " = " + formatExpression(entry.getValue(), parameters)));
                 builder.append(")");
             }
 
@@ -817,7 +824,7 @@ public final class SqlFormatter
             builder.append("SET SESSION ")
                     .append(node.getName())
                     .append(" = ")
-                    .append(formatExpression(node.getValue()));
+                    .append(formatExpression(node.getValue(), parameters));
 
             return null;
         }
@@ -838,7 +845,7 @@ public final class SqlFormatter
                 builder.append(node.getName().get())
                         .append(" => ");
             }
-            builder.append(formatExpression(node.getValue()));
+            builder.append(formatExpression(node.getValue(), parameters));
 
             return null;
         }

@@ -62,7 +62,7 @@ import java.util.function.Function;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_METASTORE_ERROR;
 import static com.facebook.presto.hive.HiveUtil.PRESTO_VIEW_FLAG;
 import static com.facebook.presto.hive.metastore.HivePrivilegeInfo.HivePrivilege.OWNERSHIP;
-import static com.facebook.presto.hive.metastore.HivePrivilegeInfo.parsePrivilege;
+import static com.facebook.presto.hive.metastore.MetastoreUtil.toGrants;
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
@@ -264,7 +264,7 @@ public class ThriftHiveMetastore
     }
 
     @Override
-    public void dropTable(String databaseName, String tableName)
+    public void dropTable(String databaseName, String tableName, boolean deleteData)
     {
         try {
             retry()
@@ -272,7 +272,7 @@ public class ThriftHiveMetastore
                     .stopOnIllegalExceptions()
                     .run("dropTable", stats.getDropTable().wrap(() -> {
                         try (HiveMetastoreClient client = clientProvider.createMetastoreClient()) {
-                            client.dropTable(databaseName, tableName, true);
+                            client.dropTable(databaseName, tableName, deleteData);
                         }
                         return null;
                     }));
@@ -409,7 +409,7 @@ public class ThriftHiveMetastore
     }
 
     @Override
-    public void dropPartition(String databaseName, String tableName, List<String> parts)
+    public void dropPartition(String databaseName, String tableName, List<String> parts, boolean deleteData)
     {
         try {
             retry()
@@ -417,13 +417,38 @@ public class ThriftHiveMetastore
                     .stopOnIllegalExceptions()
                     .run("dropPartition", stats.getDropPartition().wrap(() -> {
                         try (HiveMetastoreClient client = clientProvider.createMetastoreClient()) {
-                            client.dropPartition(databaseName, tableName, parts, true);
+                            client.dropPartition(databaseName, tableName, parts, deleteData);
                         }
                         return null;
                     }));
         }
         catch (NoSuchObjectException e) {
             throw new PartitionNotFoundException(new SchemaTableName(databaseName, tableName), parts);
+        }
+        catch (TException e) {
+            throw new PrestoException(HIVE_METASTORE_ERROR, e);
+        }
+        catch (Exception e) {
+            throw Throwables.propagate(e);
+        }
+    }
+
+    @Override
+    public void alterPartition(String databaseName, String tableName, Partition partition)
+    {
+        try {
+            retry()
+                    .stopOn(NoSuchObjectException.class, MetaException.class)
+                    .stopOnIllegalExceptions()
+                    .run("alterPartition", stats.getAlterPartition().wrap(() -> {
+                        try (HiveMetastoreClient client = clientProvider.createMetastoreClient()) {
+                            client.alterPartition(databaseName, tableName, partition);
+                        }
+                        return null;
+                    }));
+        }
+        catch (NoSuchObjectException e) {
+            throw new PartitionNotFoundException(new SchemaTableName(databaseName, tableName), partition.getValues());
         }
         catch (TException e) {
             throw new PrestoException(HIVE_METASTORE_ERROR, e);
@@ -652,19 +677,6 @@ public class ThriftHiveMetastore
         catch (Exception e) {
             throw propagate(e);
         }
-    }
-
-    private static Set<HivePrivilegeInfo> toGrants(List<PrivilegeGrantInfo> userGrants)
-    {
-        if (userGrants == null) {
-            return ImmutableSet.of();
-        }
-
-        ImmutableSet.Builder<HivePrivilegeInfo> privileges = ImmutableSet.builder();
-        for (PrivilegeGrantInfo userGrant : userGrants) {
-            privileges.addAll(parsePrivilege(userGrant));
-        }
-        return privileges.build();
     }
 
     private RetryDriver retry()

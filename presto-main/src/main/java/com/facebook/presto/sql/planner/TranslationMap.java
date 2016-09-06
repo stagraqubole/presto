@@ -108,7 +108,7 @@ class TranslationMap
                     return expressionToSymbols.get(node).toSymbolReference();
                 }
                 else if (expressionToExpressions.containsKey(node)) {
-                    Expression mapping = expressionToExpressions.get(node);
+                    Expression mapping = getMapping(node);
                     mapping = translateNamesToSymbols(mapping);
                     return treeRewriter.defaultRewrite(mapping, context);
                 }
@@ -117,6 +117,21 @@ class TranslationMap
                 }
             }
         }, mapped);
+    }
+
+    private Expression getMapping(Expression expression)
+    {
+        if (!expressionToExpressions.containsKey(expression)) {
+            return expression;
+        }
+
+        Expression mapped = expressionToExpressions.get(expression);
+        Expression translated = translateNamesToSymbols(mapped);
+        if (!translated.equals(expression) && expressionToExpressions.containsKey(translated)) {
+            mapped = getMapping(translated);
+        }
+
+        return mapped;
     }
 
     public void put(Expression expression, Symbol symbol)
@@ -132,7 +147,9 @@ class TranslationMap
         expressionToSymbols.put(translated, symbol);
 
         // also update the field mappings if this expression is a field reference
-        rewriteBase.getScope().tryResolveField(expression).ifPresent(resolvedField -> fieldSymbols[rewriteBase.getDescriptor().indexOf(resolvedField.getField())] = symbol);
+        rewriteBase.getScope().tryResolveField(expression)
+                .filter(ResolvedField::isLocal)
+                .ifPresent(field -> fieldSymbols[rewriteBase.getDescriptor().indexOf(field.getField())] = symbol);
     }
 
     public boolean containsSymbol(Expression expression)
@@ -155,13 +172,36 @@ class TranslationMap
         }
 
         Expression translated = translateNamesToSymbols(expression);
-        checkArgument(expressionToSymbols.containsKey(translated), "No mapping for expression: %s", expression);
+        if (!expressionToSymbols.containsKey(translated)) {
+            checkArgument(expressionToExpressions.containsKey(translated), "No mapping for expression: %s", expression);
+            return get(expressionToExpressions.get(translated));
+        }
+
         return expressionToSymbols.get(translated);
     }
 
     public void put(Expression expression, Expression rewritten)
     {
         expressionToExpressions.put(translateNamesToSymbols(expression), rewritten);
+    }
+
+    public void addIntermediateMapping(Expression expression, Expression rewritten)
+    {
+        if (rewritten.equals(expression)) {
+            return;
+        }
+
+        Expression translated = translateNamesToSymbols(expression);
+        if (expressionToExpressions.containsKey(translated)) {
+            Expression previousMapping = expressionToExpressions.get(translated);
+            if (!previousMapping.equals(rewritten)) {
+                put(expression, rewritten);
+                addIntermediateMapping(rewritten, previousMapping);
+            }
+        }
+        else {
+            put(expression, rewritten);
+        }
     }
 
     private Expression translateNamesToSymbols(Expression expression)
@@ -191,11 +231,9 @@ class TranslationMap
 
             private Expression rewriteExpressionWithResolvedName(Expression node)
             {
-                Optional<Symbol> symbol = rewriteBase.getSymbol(node);
-                checkState(symbol.isPresent(), "No symbol mapping for node '%s'", node);
-                Expression rewrittenExpression = symbol.get().toSymbolReference();
-
-                return coerceIfNecessary(node, rewrittenExpression);
+                return rewriteBase.getSymbol(node)
+                        .map(symbol -> coerceIfNecessary(node, symbol.toSymbolReference()))
+                        .orElse(node);
             }
 
             @Override
@@ -203,7 +241,13 @@ class TranslationMap
             {
                 Optional<ResolvedField> resolvedField = rewriteBase.getScope().tryResolveField(node);
                 if (resolvedField.isPresent()) {
-                    return rewriteExpressionWithResolvedName(node);
+                    if (resolvedField.get().isLocal()) {
+                        return rewriteBase.getSymbol(node)
+                                .map(symbol -> coerceIfNecessary(node, symbol.toSymbolReference()))
+                                .orElseThrow(() -> new IllegalStateException("No symbol mapping for node " + node));
+                    }
+                    // do not rewrite outer references, it will be handled in outer scope planner
+                    return node;
                 }
                 return rewriteExpression(node, context, treeRewriter);
             }
