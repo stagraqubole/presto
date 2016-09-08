@@ -1,0 +1,117 @@
+/*
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.facebook.presto.sql.planner.optimizations;
+
+import com.facebook.presto.Session;
+import com.facebook.presto.SystemSessionProperties;
+import com.facebook.presto.sql.analyzer.FeaturesConfig;
+import com.facebook.presto.sql.planner.Plan;
+import com.facebook.presto.sql.planner.Symbol;
+import com.facebook.presto.sql.planner.assertions.PlanAssert;
+import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
+import com.facebook.presto.sql.tree.FunctionCall;
+import com.facebook.presto.testing.LocalQueryRunner;
+import com.facebook.presto.tpch.TpchConnectorFactory;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import org.intellij.lang.annotations.Language;
+import org.testng.annotations.Test;
+
+import javax.inject.Provider;
+
+import java.util.List;
+
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.aggregation;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.anyTree;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.functionCall;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.groupingSet;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
+import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
+import static com.facebook.presto.tpch.TpchMetadata.TINY_SCHEMA_NAME;
+
+/**
+ * Created by qubole on 7/9/16.
+ */
+public class TestDistinctOptimizer
+{
+    private final LocalQueryRunner queryRunner;
+
+    public TestDistinctOptimizer()
+    {
+        Session defaultSession = testSessionBuilder()
+                .setCatalog("local")
+                .setSchema(TINY_SCHEMA_NAME)
+                .build();
+
+        defaultSession = defaultSession.withSystemProperty(SystemSessionProperties.OPTIMIZE_DISTINCT_AGGREGATIONS, "true");
+
+        this.queryRunner = new LocalQueryRunner(defaultSession);
+        queryRunner.createCatalog(queryRunner.getDefaultSession().getCatalog().get(),
+                new TpchConnectorFactory(queryRunner.getNodeManager(), 1),
+                ImmutableMap.<String, String>of());
+    }
+
+    @Test
+    public void testDistinctOptimizer()
+    {
+        @Language("SQL") String sql = "SELECT custkey, max(totalprice) AS s, Count(DISTINCT orderdate) AS d FROM orders GROUP BY custkey";
+        Symbol group = new Symbol("group");
+        // Original keys
+        Symbol groupBy = new Symbol("custkey");
+        Symbol aggr = new Symbol("totalprice");
+        Symbol distinctAggregation = new Symbol("orderdate");
+
+        // Second Aggregation data
+        List<Symbol> groupByKeysSecond = ImmutableList.of(groupBy);
+        List<FunctionCall> aggregationsSecond = ImmutableList.of(functionCall("arbitrary", "*"),
+                functionCall("count", "*"));
+
+        // First Aggregation data
+        List<Symbol> groupByKeysFirst = ImmutableList.of(groupBy, distinctAggregation, group);
+        List<FunctionCall> aggregationsFirst = ImmutableList.of(functionCall("max", "totalprice"));
+
+        // GroupingSet symbols
+        ImmutableList.Builder<List<Symbol>> groups = ImmutableList.builder();
+        groups.add(ImmutableList.of(groupBy, aggr));
+        groups.add(ImmutableList.of(groupBy, distinctAggregation));
+        assertUnitPlan(sql,
+                anyTree(
+                        aggregation(groupByKeysSecond, aggregationsSecond, ImmutableList.of(), ImmutableList.of(),
+                                project(
+                                        aggregation(groupByKeysFirst, aggregationsFirst, ImmutableList.of(), ImmutableList.of(),
+                                                groupingSet(groups.build(),
+                                                        anyTree()))))));
+    }
+
+    private void assertUnitPlan(@Language("SQL") String sql, PlanMatchPattern pattern)
+    {
+        Plan actualPlan = unitPlan(sql);
+        queryRunner.inTransaction(transactionSession -> {
+            PlanAssert.assertPlan(transactionSession, queryRunner.getMetadata(), actualPlan, pattern);
+            return null;
+        });
+    }
+
+    private Plan unitPlan(@Language("SQL") String sql)
+    {
+        FeaturesConfig featuresConfig = new FeaturesConfig()
+                .setOptimizeDistinctAggregations(true);
+        Provider<List<PlanOptimizer>> optimizerProvider = () -> ImmutableList.of(
+                new UnaliasSymbolReferences(),
+                new PruneIdentityProjections(),
+                new DistinctOptimizer(queryRunner.getMetadata()),
+                new PruneUnreferencedOutputs());
+        return queryRunner.inTransaction(transactionSession -> queryRunner.createPlan(transactionSession, sql, featuresConfig, optimizerProvider));
+    }
+}
