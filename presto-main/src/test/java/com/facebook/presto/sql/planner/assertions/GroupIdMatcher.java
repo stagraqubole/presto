@@ -21,6 +21,7 @@ import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.google.common.base.MoreObjects;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Created by qubole on 7/9/16.
@@ -29,10 +30,12 @@ public class GroupIdMatcher
     implements Matcher
 {
     private final List<List<Symbol>> groups;
+    private final Map<Symbol, Symbol> identityMappings;
 
-    public GroupIdMatcher(List<List<Symbol>> groups)
+    public GroupIdMatcher(List<List<Symbol>> groups, Map<Symbol, Symbol> identityMappings)
     {
         this.groups = groups;
+        this.identityMappings = identityMappings;
     }
 
     @Override
@@ -44,6 +47,7 @@ public class GroupIdMatcher
 
         GroupIdNode groudIdNode = (GroupIdNode) node;
         List<List<Symbol>> actualGroups = groudIdNode.getGroupingSets();
+        Map<Symbol, Symbol> actualIdentifyMappings = groudIdNode.getIdentityMappings();
 
         if (actualGroups.size() != groups.size()) {
             return false;
@@ -54,6 +58,13 @@ public class GroupIdMatcher
             if (!actualGroups.get(i).isEmpty()) {
                 return false;
             }
+        }
+
+        for (Symbol symbol : identityMappings.keySet()) {
+            actualIdentifyMappings.remove(symbol);
+        }
+        if (!actualIdentifyMappings.isEmpty()) {
+            return false;
         }
 
         return true;

@@ -858,7 +858,7 @@ public abstract class AbstractTestQueries
     }
 
     @Test
-    public void testDistinctOptimizer()
+    public void testExtractDistinctAggregationOptimizer()
             throws Exception
     {
         assertQuery("SELECT max(orderstatus), COUNT(orderkey), sum(DISTINCT orderkey) FROM orders");

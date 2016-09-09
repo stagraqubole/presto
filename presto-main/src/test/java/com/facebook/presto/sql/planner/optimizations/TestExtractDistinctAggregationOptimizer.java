@@ -43,11 +43,11 @@ import static com.facebook.presto.tpch.TpchMetadata.TINY_SCHEMA_NAME;
 /**
  * Created by qubole on 7/9/16.
  */
-public class TestDistinctOptimizer
+public class TestExtractDistinctAggregationOptimizer
 {
     private final LocalQueryRunner queryRunner;
 
-    public TestDistinctOptimizer()
+    public TestExtractDistinctAggregationOptimizer()
     {
         Session defaultSession = testSessionBuilder()
                 .setCatalog("local")
@@ -63,7 +63,7 @@ public class TestDistinctOptimizer
     }
 
     @Test
-    public void testDistinctOptimizer()
+    public void testExtractDistinctAggregationOptimizer()
     {
         @Language("SQL") String sql = "SELECT custkey, max(totalprice) AS s, Count(DISTINCT orderdate) AS d FROM orders GROUP BY custkey";
         Symbol group = new Symbol("group");
@@ -110,7 +110,7 @@ public class TestDistinctOptimizer
         Provider<List<PlanOptimizer>> optimizerProvider = () -> ImmutableList.of(
                 new UnaliasSymbolReferences(),
                 new PruneIdentityProjections(),
-                new DistinctOptimizer(queryRunner.getMetadata()),
+                new ExtractDistinctAggregationOptimizer(queryRunner.getMetadata()),
                 new PruneUnreferencedOutputs());
         return queryRunner.inTransaction(transactionSession -> queryRunner.createPlan(transactionSession, sql, featuresConfig, optimizerProvider));
     }

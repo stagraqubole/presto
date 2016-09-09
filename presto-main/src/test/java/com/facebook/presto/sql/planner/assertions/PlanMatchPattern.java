@@ -35,6 +35,7 @@ import com.facebook.presto.sql.tree.SymbolReference;
 import com.facebook.presto.sql.tree.Window;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -127,7 +128,7 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern groupingSet(List<List<Symbol>> groups, PlanMatchPattern source)
     {
-        return node(GroupIdNode.class, source).with(new GroupIdMatcher(groups));
+        return node(GroupIdNode.class, source).with(new GroupIdMatcher(groups, ImmutableMap.of()));
     }
 
     public static PlanMatchPattern aggregation(List<Symbol> groupByKeys, List<FunctionCall> aggregations, List<Symbol> masks, List<List<Symbol>> groupingSets, PlanMatchPattern source)
