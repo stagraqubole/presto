@@ -23,6 +23,7 @@ import com.facebook.presto.sql.planner.optimizations.CanonicalizeExpressions;
 import com.facebook.presto.sql.planner.optimizations.CountConstantOptimizer;
 import com.facebook.presto.sql.planner.optimizations.DesugaringOptimizer;
 import com.facebook.presto.sql.planner.optimizations.EmptyDeleteOptimizer;
+import com.facebook.presto.sql.planner.optimizations.ExtractDistinctAggregationOptimizer;
 import com.facebook.presto.sql.planner.optimizations.HashGenerationOptimizer;
 import com.facebook.presto.sql.planner.optimizations.ImplementIntersectAndExceptAsUnion;
 import com.facebook.presto.sql.planner.optimizations.ImplementSampleAsFilter;
@@ -95,6 +96,10 @@ public class PlanOptimizers
         if (featuresConfig.isOptimizeSingleDistinct()) {
             builder.add(new SingleDistinctOptimizer());
             builder.add(new PruneUnreferencedOutputs());
+        }
+
+        if (featuresConfig.getExtractDistinctAggregations()) {
+            builder.add(new ExtractDistinctAggregationOptimizer(metadata));
         }
 
         if (!forceSingleNode) {
