@@ -61,6 +61,7 @@ public final class SystemSessionProperties
     public static final String SPLIT_CONCURRENCY_ADJUSTMENT_INTERVAL = "split_concurrency_adjustment_interval";
     public static final String OPTIMIZE_METADATA_QUERIES = "optimize_metadata_queries";
     public static final String QUERY_PRIORITY = "query_priority";
+    public static final String OPTIMIZE_DISTINCT_AGGREGATIONS = "extract_distinct_aggregations";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -231,6 +232,11 @@ public final class SystemSessionProperties
                         COLOCATED_JOIN,
                         "Experimental: Use a colocated join when possible",
                         featuresConfig.isColocatedJoinsEnabled(),
+                        false),
+                booleanSessionProperty(
+                        OPTIMIZE_DISTINCT_AGGREGATIONS,
+                        "Compute hash codes for distribution, joins, and aggregations early in query plan",
+                        featuresConfig.getExtractDistinctAggregations(),
                         false));
     }
 
@@ -354,5 +360,10 @@ public final class SystemSessionProperties
     public static Duration getQueryMaxCpuTime(Session session)
     {
         return session.getProperty(QUERY_MAX_CPU_TIME, Duration.class);
+    }
+
+    public static boolean isOptimizeDistinctAggregationEnabled(Session session)
+    {
+        return session.getProperty(OPTIMIZE_DISTINCT_AGGREGATIONS, Boolean.class);
     }
 }

@@ -50,6 +50,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.facebook.presto.SystemSessionProperties.isOptimizeDistinctAggregationEnabled;
 import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.SINGLE;
 import static java.util.Objects.requireNonNull;
 
@@ -77,9 +78,13 @@ public class ExtractDistinctAggregationOptimizer
     @Override
     public PlanNode optimize(PlanNode plan, Session session, Map<Symbol, Type> types, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator)
     {
-        return SimplePlanRewriter.rewriteWith(new Optimizer(idAllocator, symbolAllocator, metadata),
-                plan,
-                Optional.empty());
+        if (isOptimizeDistinctAggregationEnabled(session)) {
+            return SimplePlanRewriter.rewriteWith(new Optimizer(idAllocator, symbolAllocator, metadata),
+                    plan,
+                    Optional.empty());
+        }
+
+        return plan;
     }
 
     private static class Optimizer
