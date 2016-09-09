@@ -50,6 +50,7 @@ public class FeaturesConfig
     private boolean optimizeSingleDistinct = true;
     private boolean pushTableWriteThroughUnion = true;
     private boolean legacyArrayAgg;
+    private boolean extractDistinctAggregations;
 
     private String processingOptimization = ProcessingOptimization.DISABLED;
     private boolean dictionaryAggregation;
@@ -307,6 +308,18 @@ public class FeaturesConfig
     public FeaturesConfig setSpillerThreads(int spillerThreads)
     {
         this.spillerThreads = spillerThreads;
+        return this;
+    }
+
+    public boolean getExtractDistinctAggregations()
+    {
+        return extractDistinctAggregations;
+    }
+
+    @Config("optimizer.extract-distinct-aggregations")
+    public FeaturesConfig setExtractDistinctAggregations(boolean extractDistinctAggregations)
+    {
+        this.extractDistinctAggregations = extractDistinctAggregations;
         return this;
     }
 }
