@@ -48,7 +48,7 @@ public class FeaturesConfig
     private boolean optimizeSingleDistinct = true;
     private boolean pushTableWriteThroughUnion = true;
     private boolean legacyArrayAgg;
-    private boolean optimizeDistinctAggregations;
+    private boolean extractDistinctAggregations;
 
     private String processingOptimization = ProcessingOptimization.DISABLED;
     private boolean dictionaryAggregation;
@@ -257,15 +257,15 @@ public class FeaturesConfig
         return this;
     }
 
-    public boolean isOptimizeDistinctAggregations()
+    public boolean isExtractDistinctAggregationsEnabled()
     {
-        return optimizeDistinctAggregations;
+        return extractDistinctAggregations;
     }
 
-    @Config("optimizer.optimize-distinct-aggregations")
-    public FeaturesConfig setOptimizeDistinctAggregations(boolean optimizeDistinctAggregations)
+    @Config("optimizer.extract-distinct-aggregations")
+    public FeaturesConfig setExtractDistinctAggregations(boolean extractDistinctAggregations)
     {
-        this.optimizeDistinctAggregations = optimizeDistinctAggregations;
+        this.extractDistinctAggregations = extractDistinctAggregations;
         return this;
     }
 }

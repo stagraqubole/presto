@@ -106,7 +106,7 @@ public class TestExtractDistinctAggregationOptimizer
     private Plan unitPlan(@Language("SQL") String sql)
     {
         FeaturesConfig featuresConfig = new FeaturesConfig()
-                .setOptimizeDistinctAggregations(true);
+                .setExtractDistinctAggregations(true);
         Provider<List<PlanOptimizer>> optimizerProvider = () -> ImmutableList.of(
                 new UnaliasSymbolReferences(),
                 new PruneIdentityProjections(),

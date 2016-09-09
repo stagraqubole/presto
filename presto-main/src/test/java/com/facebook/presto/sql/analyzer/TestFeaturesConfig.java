@@ -49,7 +49,7 @@ public class TestFeaturesConfig
                 .setRegexLibrary(JONI)
                 .setRe2JDfaStatesLimit(Integer.MAX_VALUE)
                 .setRe2JDfaRetries(5)
-                .setOptimizeDistinctAggregations(false));
+                .setExtractDistinctAggregations(false));
     }
 
     @Test
@@ -66,7 +66,7 @@ public class TestFeaturesConfig
                 .put("optimizer.optimize-metadata-queries", "true")
                 .put("optimizer.optimize-hash-generation", "false")
                 .put("optimizer.optimize-single-distinct", "false")
-                .put("optimizer.optimize-distinct-aggregations", "true")
+                .put("optimizer.extract-distinct-aggregations", "true")
                 .put("optimizer.push-table-write-through-union", "false")
                 .put("optimizer.processing-optimization", "columnar_dictionary")
                 .put("optimizer.dictionary-aggregation", "true")
@@ -85,6 +85,7 @@ public class TestFeaturesConfig
                 .put("optimizer.optimize-metadata-queries", "true")
                 .put("optimizer.optimize-hash-generation", "false")
                 .put("optimizer.optimize-single-distinct", "false")
+                .put("optimizer.extract-distinct-aggregations", "true")
                 .put("optimizer.push-table-write-through-union", "false")
                 .put("optimizer.processing-optimization", "columnar_dictionary")
                 .put("optimizer.dictionary-aggregation", "true")
@@ -103,7 +104,7 @@ public class TestFeaturesConfig
                 .setOptimizeMetadataQueries(true)
                 .setOptimizeHashGeneration(false)
                 .setOptimizeSingleDistinct(false)
-                .setOptimizeDistinctAggregations(true)
+                .setExtractDistinctAggregations(true)
                 .setPushTableWriteThroughUnion(false)
                 .setProcessingOptimization(COLUMNAR_DICTIONARY)
                 .setDictionaryAggregation(true)

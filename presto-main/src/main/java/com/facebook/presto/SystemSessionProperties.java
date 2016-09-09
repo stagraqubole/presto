@@ -224,7 +224,7 @@ public final class SystemSessionProperties
                 booleanSessionProperty(
                         OPTIMIZE_DISTINCT_AGGREGATIONS,
                         "Compute hash codes for distribution, joins, and aggregations early in query plan",
-                        featuresConfig.isOptimizeDistinctAggregations(),
+                        featuresConfig.isExtractDistinctAggregationsEnabled(),
                         false));
     }
 
