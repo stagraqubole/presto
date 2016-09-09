@@ -257,7 +257,7 @@ public class FeaturesConfig
         return this;
     }
 
-    public boolean isExtractDistinctAggregationsEnabled()
+    public boolean getExtractDistinctAggregations()
     {
         return extractDistinctAggregations;
     }
