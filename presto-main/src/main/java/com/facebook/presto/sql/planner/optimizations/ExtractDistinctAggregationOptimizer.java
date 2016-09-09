@@ -14,6 +14,7 @@
 package com.facebook.presto.sql.planner.optimizations;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.spi.type.BigintType;
@@ -77,9 +78,13 @@ public class ExtractDistinctAggregationOptimizer
     @Override
     public PlanNode optimize(PlanNode plan, Session session, Map<Symbol, Type> types, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator)
     {
-        return SimplePlanRewriter.rewriteWith(new Optimizer(idAllocator, symbolAllocator, metadata),
-                plan,
-                Optional.empty());
+        if (SystemSessionProperties.isOptimizeDistinctAggregationEnabled(session)) {
+            return SimplePlanRewriter.rewriteWith(new Optimizer(idAllocator, symbolAllocator, metadata),
+                    plan,
+                    Optional.empty());
+        }
+
+        return plan;
     }
 
     private static class Optimizer
