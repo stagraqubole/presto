@@ -72,6 +72,8 @@ public class FeaturesConfig
 
     private Duration iterativeOptimizerTimeout = new Duration(3, MINUTES); // by default let optimizer wait a long time in case it retrieves some data from ConnectorMetadata
 
+    private boolean enableCalcite = true;
+
     public boolean isResourceGroupsEnabled()
     {
         return resourceGroups;
@@ -423,6 +425,18 @@ public class FeaturesConfig
     public FeaturesConfig setPushAggregationThroughJoin(boolean value)
     {
         this.pushAggregationThroughJoin = value;
+        return this;
+    }
+
+    public boolean isEnableCalcite()
+    {
+        return enableCalcite;
+    }
+
+    @Config("optimizer.enable-calcite")
+    public FeaturesConfig setEnableCalcite(boolean value)
+    {
+        enableCalcite = value;
         return this;
     }
 }

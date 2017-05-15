@@ -74,6 +74,8 @@ public final class SystemSessionProperties
     public static final String PUSH_AGGREGATION_THROUGH_JOIN = "push_aggregation_through_join";
     public static final String PUSH_PARTIAL_AGGREGATION_THROUGH_JOIN = "push_partial_aggregation_through_join";
 
+    public static final String ENABLE_CALCITE = "enable_calcite";
+
     private final List<PropertyMetadata<?>> sessionProperties;
 
     public SystemSessionProperties()
@@ -318,7 +320,12 @@ public final class SystemSessionProperties
                         PUSH_PARTIAL_AGGREGATION_THROUGH_JOIN,
                         "Push partial aggregations below joins",
                         false,
-                        false));
+                        false),
+                booleanSessionProperty(
+                        ENABLE_CALCITE,
+                        "Enable calcite optimzer",
+                        featuresConfig.isEnableCalcite(),
+                        true));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -498,5 +505,10 @@ public final class SystemSessionProperties
     public static boolean isPushAggregationThroughJoin(Session session)
     {
         return session.getSystemProperty(PUSH_PARTIAL_AGGREGATION_THROUGH_JOIN, Boolean.class);
+    }
+
+    public static boolean isEnableCalcite(Session session)
+    {
+        return session.getSystemProperty(ENABLE_CALCITE, Boolean.class);
     }
 }
