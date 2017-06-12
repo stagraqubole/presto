@@ -52,7 +52,6 @@ import org.apache.calcite.tools.Frameworks;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.facebook.presto.util.Types.checkType;
 import static org.apache.calcite.rel.rules.FilterJoinRule.TRUE_PREDICATE;
 
 /**
@@ -110,7 +109,7 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
                 );
 
         // 3. Convert optimized Calcite plan to Presto Plan
-        CalciteToPrestoPlanConverter calciteToPrestoPlanConverter = new CalciteToPrestoPlanConverter(idAllocator, symbolAllocator);
+        CalciteToPrestoPlanConverter calciteToPrestoPlanConverter = new CalciteToPrestoPlanConverter(idAllocator, symbolAllocator, metadata.getTypeManager());
         PlanNode convertedPlan = optimizedPlan.accept(calciteToPrestoPlanConverter, new CalciteToPrestoPlanConverter.Context());
 
         return addOutputNode(convertedPlan);
@@ -119,7 +118,7 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
     private PlanNode addOutputNode(PlanNode planNode)
     {
         // TODO validate the assumption that OutputNode's columnNames can be reused here
-        OutputNode originalNode = checkType(originalPlan, OutputNode.class, "OutputNode");
+        OutputNode originalNode = (OutputNode) originalPlan;
 
         return new OutputNode(idAllocator.getNextId(),
                 planNode,

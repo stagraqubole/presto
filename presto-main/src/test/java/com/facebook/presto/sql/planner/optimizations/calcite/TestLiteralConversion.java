@@ -124,7 +124,7 @@ public class TestLiteralConversion
         literals.add(new GenericLiteral("json", "{\"a\": 1}"));
 
         LiteralConverter toRexConverter = new LiteralConverter(metadata, cluster);
-        RexNodeToExpressionConverter fromRexConverter = new RexNodeToExpressionConverter(ImmutableList.of());
+        RexNodeToExpressionConverter fromRexConverter = new RexNodeToExpressionConverter(metadata.getTypeManager(), ImmutableList.of());
         for (Literal literal : literals) {
             verifyConversion(literal, toRexConverter, fromRexConverter);
         }

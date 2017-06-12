@@ -26,6 +26,7 @@ import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.Literal;
 import com.facebook.presto.sql.tree.LogicalBinaryExpression;
+import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -143,9 +144,9 @@ public class ExpressionToRexNodeConverter
     {
         // TODO support windowing, distinct
 
-        Map<Expression, Type> types = ExpressionAnalyzer.getExpressionTypes(session, metadata, new SqlParser(), symbolAllocator.getTypes(), functionCall, emptyList());
+        Map<NodeRef<Expression>, Type> types = ExpressionAnalyzer.getExpressionTypes(session, metadata, new SqlParser(), symbolAllocator.getTypes(), functionCall, emptyList());
 
-        RelDataType returnType = typeSignatureToRelDataType(types.get(functionCall).getTypeSignature());
+        RelDataType returnType = typeSignatureToRelDataType(types.get(NodeRef.of(functionCall)).getTypeSignature());
         List<RexNode> childNodes = Lists.transform(functionCall.getArguments(),
                 arg -> convert(arg));
         List<RelDataType> args = childNodes.stream().map(node -> node.getType()).collect(Collectors.toList());

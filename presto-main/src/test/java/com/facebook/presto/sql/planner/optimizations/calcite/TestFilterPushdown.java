@@ -15,25 +15,25 @@ package com.facebook.presto.sql.planner.optimizations.calcite;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
-import com.facebook.presto.sql.analyzer.FeaturesConfig;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.Plan;
 import com.facebook.presto.sql.planner.assertions.PlanAssert;
 import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
 import com.facebook.presto.sql.planner.optimizations.DesugaringOptimizer;
 import com.facebook.presto.sql.planner.optimizations.PlanOptimizer;
+import com.facebook.presto.sql.planner.optimizations.UnaliasSymbolReferences;
 import com.facebook.presto.sql.planner.plan.JoinNode;
 import com.facebook.presto.testing.LocalQueryRunner;
 import com.facebook.presto.tpch.TpchConnectorFactory;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import org.intellij.lang.annotations.Language;
 import org.testng.annotations.Test;
 
 import java.util.List;
 
-import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.aliasPair;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.any;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.anyTree;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.equiJoinClause;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.filter;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.join;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.tableScan;
@@ -67,12 +67,15 @@ public class TestFilterPushdown
     @Test
     public void testFilterPushdownBelowProject()
     {
-        @Language("SQL") String sql = "SELECT extendedprice FROM (SELECT receiptdate, shipdate, extendedprice FROM lineitem) a WHERE a.receiptdate = a.shipdate";
+        String sql = "SELECT extendedprice FROM (SELECT receiptdate, shipdate, extendedprice FROM lineitem) a WHERE a.receiptdate = a.shipdate";
 
         PlanMatchPattern expectedPlanPattern =
                 anyTree(
                         filter("receiptdate = shipdate",
-                                tableScan("lineitem")
+                                tableScan("lineitem", ImmutableMap.of(
+                                        "receiptdate", "receiptdate",
+                                        "shipdate", "shipdate")
+                                )
                         )
                 );
 
@@ -81,8 +84,8 @@ public class TestFilterPushdown
                 new CalciteOptimizer(queryRunner.getMetadata()));
 
         queryRunner.inTransaction(transactionSession -> {
-            Plan actualPlan = queryRunner.createPlan(transactionSession, sql, new FeaturesConfig(), optimizerProvider);
-            PlanAssert.assertPlan(transactionSession, queryRunner.getMetadata(), actualPlan, expectedPlanPattern);
+            Plan actualPlan = queryRunner.createPlan(transactionSession, sql, optimizerProvider);
+            PlanAssert.assertPlan(transactionSession, queryRunner.getMetadata(), queryRunner.getCostCalculator(), actualPlan, expectedPlanPattern);
             return null;
         });
     }
@@ -90,30 +93,36 @@ public class TestFilterPushdown
     @Test
     public void testFilterPushdownBelowJoin()
     {
-        @Language("SQL") String sql = "SELECT * from orders o join (select orderkey, receiptdate, shipdate from lineitem) l on l.orderkey = o.orderkey where l.receiptdate = l.shipdate";
+        String sql = "SELECT receiptdate from orders join lineitem on lineitem.orderkey = orders.orderkey where receiptdate = shipdate";
         PlanMatchPattern expectedPlanPattern =
                 anyTree(
-                     join(
-                             JoinNode.Type.INNER,
-                             ImmutableList.of(aliasPair("O", "L")),
-                             anyTree(
-                                     tableScan("orders")
-                             ),
-                             anyTree(
-                                     filter("receiptdate = shipdate",
-                                             tableScan("lineitem")
-                                     )
-                             )
-                     )
+                        join(
+                                JoinNode.Type.INNER,
+                                ImmutableList.of(equiJoinClause("orderkey_o", "orderkey_l")),
+                                any(
+                                        tableScan("orders", ImmutableMap.of(
+                                                "orderkey_o", "orderkey"
+                                        ))
+                                ),
+                                anyTree(
+                                        filter("receiptdate_l = shipdate_l",
+                                                tableScan("lineitem", ImmutableMap.of(
+                                                        "orderkey_l", "orderkey",
+                                                        "receiptdate_l", "receiptdate",
+                                                        "shipdate_l", "shipdate"))
+                                        )
+                                )
+                        )
                 );
 
         List<PlanOptimizer> optimizerProvider = ImmutableList.of(
                 new DesugaringOptimizer(queryRunner.getMetadata(), sqlParser),
-                new CalciteOptimizer(queryRunner.getMetadata()));
+                new CalciteOptimizer(queryRunner.getMetadata()),
+                new UnaliasSymbolReferences());
 
         queryRunner.inTransaction(transactionSession -> {
-            Plan actualPlan = queryRunner.createPlan(transactionSession, sql, new FeaturesConfig(), optimizerProvider);
-            PlanAssert.assertPlan(transactionSession, queryRunner.getMetadata(), actualPlan, expectedPlanPattern);
+            Plan actualPlan = queryRunner.createPlan(transactionSession, sql, optimizerProvider);
+            PlanAssert.assertPlan(transactionSession, queryRunner.getMetadata(), queryRunner.getCostCalculator(), actualPlan, expectedPlanPattern);
             return null;
         });
     }

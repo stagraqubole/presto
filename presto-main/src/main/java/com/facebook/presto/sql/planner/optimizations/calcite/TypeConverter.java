@@ -26,6 +26,7 @@ import com.facebook.presto.spi.type.TimeWithTimeZoneType;
 import com.facebook.presto.spi.type.TimestampWithTimeZoneType;
 import com.facebook.presto.spi.type.TinyintType;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.VarbinaryType;
 import com.facebook.presto.spi.type.VarcharType;
 import com.facebook.presto.sql.planner.Symbol;
@@ -72,7 +73,6 @@ import static com.facebook.presto.spi.type.StandardTypes.TIME_WITH_TIME_ZONE;
 import static com.facebook.presto.spi.type.StandardTypes.TINYINT;
 import static com.facebook.presto.spi.type.StandardTypes.VARBINARY;
 import static com.facebook.presto.spi.type.StandardTypes.VARCHAR;
-
 /**
  * Created by shubham on 23/03/17.
  */
@@ -194,21 +194,24 @@ public class TypeConverter
     }
 
     // Calcite Type to Presto Type
-    public static Type convert(RelDataType type)
+    public static Type convert(TypeManager typeManager, RelDataType type)
     {
         if (type.isStruct()) {
-            List types = type.getFieldList().stream().map(field -> convert(field.getType())).collect(Collectors.toList());
+            List types = type.getFieldList().stream().map(field -> convert(typeManager, field.getType())).collect(Collectors.toList());
             List names = type.getFieldList().stream().map(field -> field.getName()).collect(Collectors.toList());
             return new RowType(types, Optional.of(names));
         }
         else if (type.getComponentType() != null) {
-            return new ArrayType(convert(type.getComponentType()));
+            return new ArrayType(convert(typeManager, type.getComponentType()));
         }
         else if (type.getKeyType() != null) {
-            return new MapType(
-                    convert(type.getKeyType()),
-                    convert(type.getValueType())
-            );
+            /*return MapParametricType.MAP.createType(typeManager,
+                    ImmutableList.of(
+                            TypeParameter.of(convert(typeManager, type.getKeyType()).getTypeParameters(), typeManager),
+                            convert(typeManager, type.getValueType())
+                    )
+            );*/
+            return null;
         }
 
         // All Primitive types below

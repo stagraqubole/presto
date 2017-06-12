@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.sql.planner.optimizations.calcite;
 
+import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.tree.BinaryLiteral;
 import com.facebook.presto.sql.tree.BooleanLiteral;
@@ -52,7 +53,6 @@ import java.time.LocalDate;
 import java.util.Calendar;
 import java.util.List;
 
-import static com.facebook.presto.util.Types.checkType;
 import static com.google.common.base.Preconditions.checkState;
 
 /**
@@ -64,6 +64,7 @@ import static com.google.common.base.Preconditions.checkState;
  */
 public class RexNodeToExpressionConverter
 {
+    TypeManager typeManager;
     /*
      * inputSymbols: Symbol at index i in this list is the outputSymbol of the Source PlanNode (converted from RelNode) for
      * the corresponding Field in output of source RelNode
@@ -73,8 +74,9 @@ public class RexNodeToExpressionConverter
      */
     List<Symbol> inputSymbols;
 
-    public RexNodeToExpressionConverter(List<Symbol> inputSymbols)
+    public RexNodeToExpressionConverter(TypeManager typeManager, List<Symbol> inputSymbols)
     {
+        this.typeManager = typeManager;
         this.inputSymbols = inputSymbols;
     }
 
@@ -135,7 +137,7 @@ public class RexNodeToExpressionConverter
             case IS_DISTINCT_FROM:
                 return getPrestoComparisonExpression(ComparisonExpressionType.IS_DISTINCT_FROM, builder.build());
             case OTHER_FUNCTION:
-                SqlFunction function = checkType(node.getOperator(), SqlFunction.class, "SqlFunction");
+                SqlFunction function = (SqlFunction) node.getOperator();
                 checkState(function.getFunctionType().equals(SqlFunctionCategory.USER_DEFINED_FUNCTION), "Non USER_DEFINED_FUNCTION never created while creating calcite plan");
                 // TODO support windowing, distinct etc
                 return new FunctionCall(QualifiedName.of(function.getName()), builder.build());
@@ -144,7 +146,7 @@ public class RexNodeToExpressionConverter
                 checkState(node.getOperands().size() == 1, "More than one operand in cast: " + node.getOperands().size());
                 return new Cast(
                         convert(node.getOperands().get(0)),
-                        TypeConverter.convert(node.getType()).getDisplayName()
+                        TypeConverter.convert(typeManager, node.getType()).getDisplayName()
                 );
             case AND:
                 return getPrestoLogicalBinaryExpression(LogicalBinaryExpression.Type.AND, builder.build());

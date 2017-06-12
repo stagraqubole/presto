@@ -58,7 +58,7 @@ import static com.google.common.base.Verify.verify;
  * Created by shubham on 23/03/17.
  */
 public class PrestoToCalcitePlanConvertor
-        extends PlanVisitor<PrestoToCalcitePlanConvertor.PrestoToCalcitePlanContext, RelNode>
+        extends PlanVisitor<RelNode, PrestoToCalcitePlanConvertor.PrestoToCalcitePlanContext>
 {
     private RelOptCluster cluster;
     private Metadata metadata;

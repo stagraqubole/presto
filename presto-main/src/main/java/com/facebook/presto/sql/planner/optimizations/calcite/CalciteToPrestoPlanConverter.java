@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.sql.planner.optimizations.calcite;
 
+import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
@@ -22,6 +23,7 @@ import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoJoinN
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoProject;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoRelNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoTableScan;
+import com.facebook.presto.sql.planner.plan.Assignments;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.JoinNode;
 import com.facebook.presto.sql.planner.plan.PlanNode;
@@ -32,7 +34,6 @@ import com.facebook.presto.sql.tree.ComparisonExpressionType;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.LogicalBinaryExpression;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexCall;
 
@@ -40,7 +41,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static com.facebook.presto.util.Types.checkType;
 import static com.google.common.base.Preconditions.checkState;
 
 /**
@@ -50,6 +50,7 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
 {
     private final SymbolAllocator symbolAllocator;
     private final PlanNodeIdAllocator idAllocator;
+    private final TypeManager typeManager;
 
     /*
      * Each node visitor is responsible for setting context.symbols list for its parent node to use
@@ -57,19 +58,20 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
      *  The Presto Symbol in PlanNode corresponding to the Calcite Symbol in the output of RelNode which is being converted to PlanNode
      * This list is later used in Parent to resolve RexInputReference
      */
-    public CalciteToPrestoPlanConverter(PlanNodeIdAllocator idAllocator, SymbolAllocator symbolAllocator)
+    public CalciteToPrestoPlanConverter(PlanNodeIdAllocator idAllocator, SymbolAllocator symbolAllocator, TypeManager typeManager)
     {
         this.idAllocator = idAllocator;
         this.symbolAllocator = symbolAllocator;
+        this.typeManager = typeManager;
     }
 
     @Override
     public PlanNode visitJoin(PrestoJoinNode node, Context context)
     {
-        PlanNode left = checkType(node.getLeft(), PrestoRelNode.class, "ProjectNode").accept(this, context);
-        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(context.getSymbols());
+        PlanNode left = ((PrestoRelNode) node.getLeft()).accept(this, context);
+        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(typeManager, context.getSymbols());
 
-        PlanNode right = checkType(node.getRight(), PrestoRelNode.class, "ProjectNode").accept(this, context);
+        PlanNode right =  ((PrestoRelNode) node.getRight()).accept(this, context);
         converter.addSymbols(context.getSymbols());
 
         Expression joinCondition = converter.convert(node.getCondition());
@@ -118,7 +120,12 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
                 left,
                 right,
                 criterea,
+                ImmutableList.<Symbol>builder()
+                        .addAll(left.getOutputSymbols())
+                        .addAll(right.getOutputSymbols())
+                        .build(),
                 filters.size() == 0 ? Optional.empty() : Optional.of(filters.get(0)),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
 
@@ -134,16 +141,16 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
     @Override
     public PlanNode visitProject(PrestoProject node, Context context)
     {
-        PlanNode source = checkType(node.getInput(), PrestoRelNode.class, "ProjectNode").accept(this, context);
-        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(context.getSymbols());
+        PlanNode source = ((PrestoRelNode) node.getInput()).accept(this, context);
+        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(typeManager, context.getSymbols());
 
         // projectNode.outputSymbols is map.keyset so ordering might not match relNode's output field list
         ImmutableList.Builder relNodeToPlanNodeOutputMapping = new ImmutableList.Builder();
-        ImmutableMap.Builder assignments = new ImmutableMap.Builder();
+        Assignments.Builder assignments = Assignments.builder();
 
         for (int i = 0; i < node.getChildExps().size(); i++) {
             Expression prestoExpr = converter.convert(node.getChildExps().get(i));
-            Symbol symbol = symbolAllocator.newSymbol(node.getRowType().getFieldList().get(i).getName(), TypeConverter.convert(node.getChildExps().get(i).getType()));
+            Symbol symbol = symbolAllocator.newSymbol(node.getRowType().getFieldList().get(i).getName(), TypeConverter.convert(typeManager, node.getChildExps().get(i).getType()));
             assignments.put(symbol, prestoExpr);
             relNodeToPlanNodeOutputMapping.add(symbol);
         }
@@ -155,10 +162,10 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
     @Override
     public PlanNode visitFilter(PrestoFilter node, Context context)
     {
-        PlanNode source = checkType(node.getInput(), PrestoRelNode.class, "ProjectNode").accept(this, context);
+        PlanNode source = ((PrestoRelNode) node.getInput()).accept(this, context);
 
         if (node.getCondition() instanceof RexCall) {
-            RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(context.getSymbols());
+            RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(typeManager, context.getSymbols());
 
             context.setSymbols(source.getOutputSymbols());
             return new FilterNode(idAllocator.getNextId(), source, converter.convert(node.getCondition()));
