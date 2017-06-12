@@ -25,12 +25,12 @@
         <artifact id="${project.groupId}:presto-main:${project.version}" />
     </artifactSet>
 
-    <!-- Plugins -->
+    <!-- Plugins
     <artifactSet to="plugin/resource-group-managers">
         <artifact id="${project.groupId}:presto-resource-group-managers:zip:${project.version}">
             <unpack />
         </artifact>
-    </artifactSet>
+    </artifactSet> -->
 
     <artifactSet to="plugin/jmx">
         <artifact id="${project.groupId}:presto-jmx:zip:${project.version}">
@@ -38,6 +38,7 @@
         </artifact>
     </artifactSet>
 
+<!--
     <artifactSet to="plugin/cassandra">
         <artifact id="${project.groupId}:presto-cassandra:zip:${project.version}">
             <unpack />
@@ -49,13 +50,13 @@
             <unpack />
         </artifact>
     </artifactSet>
-
+-->
     <artifactSet to="plugin/hive-hadoop2">
         <artifact id="${project.groupId}:presto-hive-hadoop2:zip:${project.version}">
             <unpack />
         </artifact>
     </artifactSet>
-
+<!--
     <artifactSet to="plugin/memory">
         <artifact id="${project.groupId}:presto-memory:zip:${project.version}">
             <unpack />
@@ -145,4 +146,5 @@
             <unpack />
         </artifact>
     </artifactSet>
+-->
 </runtime>
