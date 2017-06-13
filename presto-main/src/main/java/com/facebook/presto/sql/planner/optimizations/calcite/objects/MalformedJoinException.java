@@ -13,26 +13,13 @@
  */
 package com.facebook.presto.sql.planner.optimizations.calcite.objects;
 
-import org.apache.calcite.plan.RelOptAbstractTable;
-import org.apache.calcite.plan.RelOptSchema;
-import org.apache.calcite.rel.type.RelDataType;
-
 /**
- * Created by shubham on 23/03/17.
+ * Created by shubham on 13/06/17.
  */
-public class RelOptPrestoTable extends RelOptAbstractTable
+public class MalformedJoinException extends CalciteException
 {
-    double rowCount = 100D;
-
-    public RelOptPrestoTable(RelOptSchema schema, String name, RelDataType rowType, double rowCount)
+    public MalformedJoinException(String message)
     {
-        super(schema, name, rowType);
-        this.rowCount = rowCount;
-    }
-
-    @Override
-    public double getRowCount()
-    {
-        return rowCount;
+        super(message);
     }
 }

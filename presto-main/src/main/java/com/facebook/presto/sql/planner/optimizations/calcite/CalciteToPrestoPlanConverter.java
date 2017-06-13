@@ -18,6 +18,7 @@ import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.CalciteUnsupportedException;
+import com.facebook.presto.sql.planner.optimizations.calcite.objects.MalformedJoinException;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoFilter;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoJoinNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoProject;
@@ -135,7 +136,43 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
         }
         context.setSymbols(builder.build());
 
-        return joinNode;
+        return fixJoinIfNeeded(joinNode);
+    }
+
+    private JoinNode fixJoinIfNeeded(JoinNode node)
+    {
+        // In case of join re-ordering, the returned condition is also reversed along with the table order
+        // Because of this the left operand would be from right and vice versa, fixing that here
+        ImmutableList.Builder critereaBuilder = ImmutableList.builder();
+        for (JoinNode.EquiJoinClause equiJoinClause : node.getCriteria()) {
+            Symbol left = equiJoinClause.getLeft();
+            Symbol right = equiJoinClause.getRight();
+
+            if (node.getLeft().getOutputSymbols().contains(right) &&
+                    node.getRight().getOutputSymbols().contains(left)) {
+                critereaBuilder.add(new JoinNode.EquiJoinClause(right, left));
+            }
+            else if (node.getLeft().getOutputSymbols().contains(left) &&
+                    node.getRight().getOutputSymbols().contains(right)) {
+                critereaBuilder.add(new JoinNode.EquiJoinClause(left, right));
+            }
+            else {
+                throw new MalformedJoinException(String.format("[%s, %s] symbols not found in source nodes",
+                        left, right));
+            }
+        }
+
+        return new JoinNode(
+                idAllocator.getNextId(),
+                node.getType(),
+                node.getLeft(),
+                node.getRight(),
+                critereaBuilder.build(),
+                node.getOutputSymbols(),
+                node.getFilter(),
+                node.getLeftHashSymbol(),
+                node.getRightHashSymbol(),
+                node.getDistributionType());
     }
 
     @Override

@@ -16,8 +16,12 @@ package com.facebook.presto.sql.planner.optimizations.calcite;
 import com.facebook.presto.Session;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.TableMetadata;
+import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
+import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.SchemaTableName;
+import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.sql.planner.DomainTranslator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoFilter;
@@ -33,6 +37,7 @@ import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.PlanVisitor;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.TableScanNode;
+import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.Expression;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -236,7 +241,8 @@ public class PrestoToCalcitePlanConvertor
                         cluster,
                         node.getOutputSymbols(),
                         node.getOutputSymbols().stream().map(symbol -> symbolAllocator.getTypes().get(symbol)).collect(Collectors.toList())
-                )
+                ),
+                metadata.getTableStatistics(session, node.getTable(), getConstraint(node, BooleanLiteral.TRUE_LITERAL)).getRowCount().getValue()
         );
         PrestoTableScan tableScan = new PrestoTableScan(cluster, cluster.traitSetOf(PrestoRelNode.CONVENTION), table, node);
 
@@ -247,6 +253,22 @@ public class PrestoToCalcitePlanConvertor
         }
         context.addRelNodeColumnMap(tableScan, builder.build());
         return tableScan;
+    }
+
+    // Copied from CoefficientBasedCostCalculator
+    private Constraint<ColumnHandle> getConstraint(TableScanNode node, Expression predicate)
+    {
+        DomainTranslator.ExtractionResult decomposedPredicate = DomainTranslator.fromPredicate(
+                metadata,
+                session,
+                predicate,
+                symbolAllocator.getTypes());
+
+        TupleDomain<ColumnHandle> simplifiedConstraint = decomposedPredicate.getTupleDomain()
+                .transform(node.getAssignments()::get)
+                .intersect(node.getCurrentConstraint());
+
+        return new Constraint<>(simplifiedConstraint, bindings -> true);
     }
 
     // Merges conditions into one RexNode with AND operator

@@ -18,6 +18,7 @@ import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoFilter;
+import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoJoinNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoProject;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoRelNode;
 import com.facebook.presto.sql.planner.plan.OutputNode;
@@ -28,10 +29,13 @@ import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptQuery;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptSchema;
+import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.plan.hep.HepMatchOrder;
 import org.apache.calcite.plan.hep.HepPlanner;
+import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.plan.hep.HepProgramBuilder;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.metadata.CachingRelMetadataProvider;
@@ -41,8 +45,12 @@ import org.apache.calcite.rel.metadata.RelMetadataProvider;
 import org.apache.calcite.rel.rules.FilterJoinRule;
 import org.apache.calcite.rel.rules.FilterMergeRule;
 import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
+import org.apache.calcite.rel.rules.JoinToMultiJoinRule;
+import org.apache.calcite.rel.rules.LoptOptimizeJoinRule;
+import org.apache.calcite.rel.rules.ProjectMergeRule;
 import org.apache.calcite.rel.rules.ProjectRemoveRule;
 import org.apache.calcite.rel.rules.ReduceExpressionsRule;
+import org.apache.calcite.rel.rules.UnionMergeRule;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexExecutorImpl;
 import org.apache.calcite.schema.SchemaPlus;
@@ -107,6 +115,41 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
                         PrestoProject.DEFAULT_PROJECT_FACTORY,
                         TRUE_PREDICATE)
                 );
+
+        // 3. Apply join reordering
+        /*List<RelMetadataProvider> list = Lists.newArrayList();
+        list.add(mdProvider.getMetadataProvider());*/
+        RelTraitSet desiredTraits = cluster
+                .traitSetOf(PrestoRelNode.CONVENTION, RelCollations.EMPTY);
+
+        HepProgram hepPgm;
+        HepProgramBuilder hepPgmBldr = new HepProgramBuilder().addMatchOrder(HepMatchOrder.BOTTOM_UP)
+                .addRuleInstance(new JoinToMultiJoinRule(PrestoJoinNode.class));
+        hepPgmBldr.addRuleInstance(new LoptOptimizeJoinRule(PrestoJoinNode.PRESTO_JOIN_FACTORY,
+                PrestoProject.DEFAULT_PROJECT_FACTORY, PrestoFilter.DEFAULT_FILTER_FACTORY));
+
+        hepPgmBldr.addRuleInstance(ReduceExpressionsRule.JOIN_INSTANCE);
+        hepPgmBldr.addRuleInstance(ReduceExpressionsRule.FILTER_INSTANCE);
+        hepPgmBldr.addRuleInstance(ReduceExpressionsRule.PROJECT_INSTANCE);
+        hepPgmBldr.addRuleInstance(ProjectRemoveRule.INSTANCE);
+        hepPgmBldr.addRuleInstance(UnionMergeRule.INSTANCE);
+        hepPgmBldr.addRuleInstance(new ProjectMergeRule(false, PrestoProject.DEFAULT_PROJECT_FACTORY));
+
+        hepPgm = hepPgmBldr.build();
+        HepPlanner hepPlanner = new HepPlanner(hepPgm);
+
+        //hepPlanner.registerMetadataProviders(ImmutableList.of(cluster.getMetadataProvider()));
+        //RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(list);
+        //cluster.setMetadataProvider(new CachingRelMetadataProvider(chainedProvider, hepPlanner));
+
+        RelNode rootRel = optimizedPlan;
+        hepPlanner.setRoot(rootRel);
+        if (!optimizedPlan.getTraitSet().equals(desiredTraits)) {
+            rootRel = hepPlanner.changeTraits(optimizedPlan, desiredTraits);
+        }
+        hepPlanner.setRoot(rootRel);
+
+        optimizedPlan = (PrestoRelNode) hepPlanner.findBestExp();
 
         // 3. Convert optimized Calcite plan to Presto Plan
         CalciteToPrestoPlanConverter calciteToPrestoPlanConverter = new CalciteToPrestoPlanConverter(idAllocator, symbolAllocator, metadata.getTypeManager());

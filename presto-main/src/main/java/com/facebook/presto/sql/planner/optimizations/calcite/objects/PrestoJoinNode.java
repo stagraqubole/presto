@@ -31,7 +31,7 @@ import java.util.Set;
 public class PrestoJoinNode extends Join
         implements PrestoRelNode
 {
-    public static final RelFactories.JoinFactory HIVE_JOIN_FACTORY = new PrestoJoinFactoryImpl();
+    public static final RelFactories.JoinFactory PRESTO_JOIN_FACTORY = new PrestoJoinFactoryImpl();
 
     public PrestoJoinNode(RelOptCluster cluster, RelTraitSet traits, RelNode left, RelNode right, RexNode condition, JoinRelType joinType)
     {
