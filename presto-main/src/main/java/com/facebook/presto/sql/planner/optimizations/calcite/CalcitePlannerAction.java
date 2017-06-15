@@ -97,7 +97,7 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
 
         // 2. Apply Calcite Optimizations
         // Add tests for the rules added
-        PrestoRelNode optimizedPlan = (PrestoRelNode) hepPlan(calcitePlan, new DefaultRelMetadataProvider(),
+        PrestoRelNode optimizedPlan = (PrestoRelNode) hepPlan(calcitePlan, DefaultRelMetadataProvider.INSTANCE,
                 ReduceExpressionsRule.PROJECT_INSTANCE,
                 ReduceExpressionsRule.FILTER_INSTANCE,
                 ReduceExpressionsRule.JOIN_INSTANCE,
@@ -123,8 +123,10 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
                 .traitSetOf(PrestoRelNode.CONVENTION, RelCollations.EMPTY);
 
         HepProgram hepPgm;
-        HepProgramBuilder hepPgmBldr = new HepProgramBuilder().addMatchOrder(HepMatchOrder.BOTTOM_UP)
-                .addRuleInstance(new JoinToMultiJoinRule(PrestoJoinNode.class));
+        HepProgramBuilder hepPgmBldr = new HepProgramBuilder().addMatchOrder(HepMatchOrder.BOTTOM_UP);
+        hepPgmBldr.addRuleInstance(new LoptOptimizeJoinRule(PrestoJoinNode.PRESTO_JOIN_FACTORY,
+                PrestoProject.DEFAULT_PROJECT_FACTORY, PrestoFilter.DEFAULT_FILTER_FACTORY));
+        hepPgmBldr.addRuleInstance(new JoinToMultiJoinRule(PrestoJoinNode.class));
         hepPgmBldr.addRuleInstance(new LoptOptimizeJoinRule(PrestoJoinNode.PRESTO_JOIN_FACTORY,
                 PrestoProject.DEFAULT_PROJECT_FACTORY, PrestoFilter.DEFAULT_FILTER_FACTORY));
 
@@ -134,7 +136,6 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
         hepPgmBldr.addRuleInstance(ProjectRemoveRule.INSTANCE);
         hepPgmBldr.addRuleInstance(UnionMergeRule.INSTANCE);
         hepPgmBldr.addRuleInstance(new ProjectMergeRule(false, PrestoProject.DEFAULT_PROJECT_FACTORY));
-
         hepPgm = hepPgmBldr.build();
         HepPlanner hepPlanner = new HepPlanner(hepPgm);
 
@@ -152,7 +153,7 @@ public class CalcitePlannerAction implements Frameworks.PlannerAction<PlanNode>
         optimizedPlan = (PrestoRelNode) hepPlanner.findBestExp();
 
         // 3. Convert optimized Calcite plan to Presto Plan
-        CalciteToPrestoPlanConverter calciteToPrestoPlanConverter = new CalciteToPrestoPlanConverter(idAllocator, symbolAllocator, metadata.getTypeManager());
+        CalciteToPrestoPlanConverter calciteToPrestoPlanConverter = new CalciteToPrestoPlanConverter(metadata, session, idAllocator, symbolAllocator, metadata.getTypeManager());
         PlanNode convertedPlan = optimizedPlan.accept(calciteToPrestoPlanConverter, new CalciteToPrestoPlanConverter.Context());
 
         return addOutputNode(convertedPlan);

@@ -15,6 +15,7 @@ package com.facebook.presto.sql.planner.optimizations.calcite;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.tree.BinaryLiteral;
 import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.CharLiteral;
@@ -124,7 +125,7 @@ public class TestLiteralConversion
         literals.add(new GenericLiteral("json", "{\"a\": 1}"));
 
         LiteralConverter toRexConverter = new LiteralConverter(metadata, cluster);
-        RexNodeToExpressionConverter fromRexConverter = new RexNodeToExpressionConverter(metadata.getTypeManager(), ImmutableList.of());
+        RexNodeToExpressionConverter fromRexConverter = new RexNodeToExpressionConverter(metadata, session, new SymbolAllocator(), ImmutableList.of());
         for (Literal literal : literals) {
             verifyConversion(literal, toRexConverter, fromRexConverter);
         }

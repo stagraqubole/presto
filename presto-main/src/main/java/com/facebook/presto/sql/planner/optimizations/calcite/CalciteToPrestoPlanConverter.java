@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.sql.planner.optimizations.calcite;
 
+import com.facebook.presto.Session;
+import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
@@ -52,6 +54,8 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
     private final SymbolAllocator symbolAllocator;
     private final PlanNodeIdAllocator idAllocator;
     private final TypeManager typeManager;
+    private final Session session;
+    private final Metadata metadata;
 
     /*
      * Each node visitor is responsible for setting context.symbols list for its parent node to use
@@ -59,8 +63,10 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
      *  The Presto Symbol in PlanNode corresponding to the Calcite Symbol in the output of RelNode which is being converted to PlanNode
      * This list is later used in Parent to resolve RexInputReference
      */
-    public CalciteToPrestoPlanConverter(PlanNodeIdAllocator idAllocator, SymbolAllocator symbolAllocator, TypeManager typeManager)
+    public CalciteToPrestoPlanConverter(Metadata metadata, Session session, PlanNodeIdAllocator idAllocator, SymbolAllocator symbolAllocator, TypeManager typeManager)
     {
+        this.metadata = metadata;
+        this.session = session;
         this.idAllocator = idAllocator;
         this.symbolAllocator = symbolAllocator;
         this.typeManager = typeManager;
@@ -70,7 +76,7 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
     public PlanNode visitJoin(PrestoJoinNode node, Context context)
     {
         PlanNode left = ((PrestoRelNode) node.getLeft()).accept(this, context);
-        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(typeManager, context.getSymbols());
+        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(metadata, session, symbolAllocator, context.getSymbols());
 
         PlanNode right =  ((PrestoRelNode) node.getRight()).accept(this, context);
         converter.addSymbols(context.getSymbols());
@@ -179,7 +185,7 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
     public PlanNode visitProject(PrestoProject node, Context context)
     {
         PlanNode source = ((PrestoRelNode) node.getInput()).accept(this, context);
-        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(typeManager, context.getSymbols());
+        RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(metadata, session, symbolAllocator, context.getSymbols());
 
         // projectNode.outputSymbols is map.keyset so ordering might not match relNode's output field list
         ImmutableList.Builder relNodeToPlanNodeOutputMapping = new ImmutableList.Builder();
@@ -202,7 +208,7 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
         PlanNode source = ((PrestoRelNode) node.getInput()).accept(this, context);
 
         if (node.getCondition() instanceof RexCall) {
-            RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(typeManager, context.getSymbols());
+            RexNodeToExpressionConverter converter = new RexNodeToExpressionConverter(metadata, session, symbolAllocator, context.getSymbols());
 
             context.setSymbols(source.getOutputSymbols());
             return new FilterNode(idAllocator.getNextId(), source, converter.convert(node.getCondition()));

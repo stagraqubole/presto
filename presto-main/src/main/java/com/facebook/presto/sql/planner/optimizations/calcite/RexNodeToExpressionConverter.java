@@ -13,8 +13,14 @@
  */
 package com.facebook.presto.sql.planner.optimizations.calcite;
 
-import com.facebook.presto.spi.type.TypeManager;
+import com.facebook.presto.Session;
+import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.sql.analyzer.ExpressionAnalyzer;
+import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.Symbol;
+import com.facebook.presto.sql.planner.SymbolAllocator;
+import com.facebook.presto.sql.planner.optimizations.calcite.objects.MalformedComparison;
 import com.facebook.presto.sql.tree.BinaryLiteral;
 import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.Cast;
@@ -30,6 +36,7 @@ import com.facebook.presto.sql.tree.IntervalLiteral;
 import com.facebook.presto.sql.tree.Literal;
 import com.facebook.presto.sql.tree.LogicalBinaryExpression;
 import com.facebook.presto.sql.tree.LongLiteral;
+import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.sql.tree.NullLiteral;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.TimeLiteral;
@@ -52,6 +59,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Optional;
 
 import static com.google.common.base.Preconditions.checkState;
 
@@ -64,7 +72,9 @@ import static com.google.common.base.Preconditions.checkState;
  */
 public class RexNodeToExpressionConverter
 {
-    TypeManager typeManager;
+    Metadata metadata;
+    Session session;
+    SymbolAllocator symbolAllocator;
     /*
      * inputSymbols: Symbol at index i in this list is the outputSymbol of the Source PlanNode (converted from RelNode) for
      * the corresponding Field in output of source RelNode
@@ -74,10 +84,12 @@ public class RexNodeToExpressionConverter
      */
     List<Symbol> inputSymbols;
 
-    public RexNodeToExpressionConverter(TypeManager typeManager, List<Symbol> inputSymbols)
+    public RexNodeToExpressionConverter(Metadata metadata, Session session, SymbolAllocator symbolAllocator, List<Symbol> inputSymbols)
     {
-        this.typeManager = typeManager;
         this.inputSymbols = inputSymbols;
+        this.metadata = metadata;
+        this.session = session;
+        this.symbolAllocator = symbolAllocator;
     }
 
     /*
@@ -146,7 +158,7 @@ public class RexNodeToExpressionConverter
                 checkState(node.getOperands().size() == 1, "More than one operand in cast: " + node.getOperands().size());
                 return new Cast(
                         convert(node.getOperands().get(0)),
-                        TypeConverter.convert(typeManager, node.getType()).getDisplayName()
+                        TypeConverter.convert(metadata.getTypeManager(), node.getType()).getDisplayName()
                 );
             case AND:
                 return getPrestoLogicalBinaryExpression(LogicalBinaryExpression.Type.AND, builder.build());
@@ -160,7 +172,43 @@ public class RexNodeToExpressionConverter
     private ComparisonExpression getPrestoComparisonExpression(ComparisonExpressionType type, List<Expression> operands)
     {
         checkState(operands.size() == 2, String.format("More than two operands [%d] for comparison operator %s", operands.size(), type));
-        return new ComparisonExpression(type, operands.get(0), operands.get(1));
+        /*
+         * We could have lost CAST added for coercions as calcite removes certain cast to simplify expression which cuases problem for presto
+         * e.g. "WHERE bigint_type_col = 10" Presto adds coercion "WHERE bigint_type_col = CAST(10 as BIGINT)" and calcite removes this internally
+         * revisit the expressions here to make sure we are okay
+         */
+        Expression left = operands.get(0);
+        Expression right = operands.get(1);
+        Type leftType  = ExpressionAnalyzer.getExpressionTypes(
+                session,
+                metadata,
+                new SqlParser(),
+                symbolAllocator.getTypes(),
+                left,
+                java.util.Collections.emptyList()).get(NodeRef.of(left));
+        Type rightType  = ExpressionAnalyzer.getExpressionTypes(
+                session,
+                metadata,
+                new SqlParser(),
+                symbolAllocator.getTypes(),
+                right,
+                java.util.Collections.emptyList()).get(NodeRef.of(right));
+
+        Optional<Type> commonType = metadata.getTypeManager().getCommonSuperType(leftType, rightType);
+
+        if (!commonType.isPresent()) {
+            throw new MalformedComparison(leftType, rightType);
+        }
+
+        if (!leftType.equals(commonType.get())) {
+            left = new Cast(left, commonType.get().toString());
+        }
+
+        if (!rightType.equals(commonType.get())) {
+            right = new Cast(right, commonType.get().toString());
+        }
+
+        return new ComparisonExpression(type, left, right);
     }
 
     private LogicalBinaryExpression getPrestoLogicalBinaryExpression(LogicalBinaryExpression.Type type, List<Expression> operands)
@@ -234,7 +282,7 @@ public class RexNodeToExpressionConverter
                 int months = ((BigDecimal) literal.getValue()).intValue();
                 return new IntervalLiteral(Integer.toString(months), IntervalLiteral.Sign.POSITIVE, IntervalLiteral.IntervalField.MONTH);
 
-            case INTERVAL_DAY_TIME:
+            case INTERVAL_DAY_SECOND:
                 int millis = ((BigDecimal) literal.getValue()).intValue();
                 return new IntervalLiteral(Double.toString((double) millis / 1000), IntervalLiteral.Sign.POSITIVE, IntervalLiteral.IntervalField.SECOND);
 

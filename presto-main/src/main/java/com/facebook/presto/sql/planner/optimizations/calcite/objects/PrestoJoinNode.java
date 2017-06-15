@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.core.RelFactories;
@@ -52,6 +53,12 @@ public class PrestoJoinNode extends Join
 
     private static class PrestoJoinFactoryImpl implements RelFactories.JoinFactory
     {
+        @Override
+        public RelNode createJoin(RelNode left, RelNode right, RexNode condition, Set<CorrelationId> set, JoinRelType joinRelType, boolean b)
+        {
+            return createJoin(left, right, condition, joinRelType, ImmutableSet.of(), b);
+        }
+
         @Override
         public RelNode createJoin(RelNode left, RelNode right, RexNode condition, JoinRelType joinType,
                                   Set<String> variablesStopped, boolean semiJoinDone)

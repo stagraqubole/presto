@@ -56,4 +56,16 @@ public class PrestoTableScan extends TableScan
         checkState(inputs.isEmpty(), "TableScan node should have children nodes");
         return this;
     }
+
+    @Override
+    public String computeDigest()
+    {
+        String tmpDigest = super.computeDigest();
+
+        // HepPlanner.setRoot can cause problems in self join
+        // It would ignore the second TBS and just use the first one in both leaf nodes
+        // This would break Presto later on as join criteria will have same symbol on both sides
+        // Make digest unique to prevent this
+        return tmpDigest + planNode.getId();
+    }
 }

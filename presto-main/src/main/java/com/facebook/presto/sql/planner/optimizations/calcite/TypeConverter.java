@@ -142,8 +142,7 @@ public class TypeConverter
                 convertedType = dtFactory.createSqlType(SqlTypeName.VARBINARY);
                 break;
             case INTERVAL_DAY_TO_SECOND:
-                // TODO check if this breaks
-                convertedType = dtFactory.createSqlType(SqlTypeName.INTERVAL_DAY_TIME);
+                convertedType = dtFactory.createSqlType(SqlTypeName.INTERVAL_DAY_SECOND);
                 break;
             case INTERVAL_YEAR_TO_MONTH:
                 convertedType = dtFactory.createSqlIntervalType(
@@ -234,7 +233,7 @@ public class TypeConverter
                 return RealType.REAL;
             case DOUBLE:
                 return DoubleType.DOUBLE;
-            case INTERVAL_DAY_TIME:
+            case INTERVAL_DAY_SECOND:
                 // TODO check if this breaks
                 return IntervalDayTimeType.INTERVAL_DAY_TIME;
             case INTERVAL_YEAR_MONTH:
