@@ -23,12 +23,14 @@ import com.facebook.presto.sql.planner.optimizations.calcite.objects.CalciteUnsu
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.MalformedJoinException;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoFilter;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoJoinNode;
+import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoLimitNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoProject;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoRelNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoTableScan;
 import com.facebook.presto.sql.planner.plan.Assignments;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.JoinNode;
+import com.facebook.presto.sql.planner.plan.LimitNode;
 import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.TableScanNode;
@@ -216,6 +218,16 @@ public class CalciteToPrestoPlanConverter extends PrestoRelVisitor<CalciteToPres
         else {
             throw new UnsupportedOperationException("Unsupported type of condition " + node.getCondition().getClass());
         }
+    }
+
+    @Override
+    public PlanNode visitLimit(PrestoLimitNode node, Context context)
+    {
+        PlanNode source = ((PrestoRelNode) node.getInput()).accept(this, context);
+        PlanNode planNode = new LimitNode(idAllocator.getNextId(), source, node.getLimit(), node.isPartial());
+        context.setSymbols(planNode.getOutputSymbols());
+
+        return planNode;
     }
 
     @Override

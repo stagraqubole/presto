@@ -26,12 +26,14 @@ import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoFilter;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoJoinNode;
+import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoLimitNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoProject;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoRelNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoTableScan;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.RelOptPrestoTable;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.JoinNode;
+import com.facebook.presto.sql.planner.plan.LimitNode;
 import com.facebook.presto.sql.planner.plan.OutputNode;
 import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.PlanVisitor;
@@ -219,6 +221,17 @@ public class PrestoToCalcitePlanConvertor
         context.addRelNodeColumnMap(filterNode, context.getColumnMap(source));
 
         return filterNode;
+    }
+
+    @Override
+    public RelNode visitLimit(LimitNode node, PrestoToCalcitePlanContext context)
+    {
+        RelNode source = context.rewrite(node.getSource(), this);
+
+        RelNode limitNode = new PrestoLimitNode(cluster, cluster.traitSetOf(PrestoRelNode.CONVENTION), source, node.getCount(), node.isPartial());
+        context.addRelNodeColumnMap(limitNode, context.getColumnMap(source));
+
+        return limitNode;
     }
 
     @Override

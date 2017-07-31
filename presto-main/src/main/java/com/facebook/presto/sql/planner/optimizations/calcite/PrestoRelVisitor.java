@@ -15,6 +15,7 @@ package com.facebook.presto.sql.planner.optimizations.calcite;
 
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoFilter;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoJoinNode;
+import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoLimitNode;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoProject;
 import com.facebook.presto.sql.planner.optimizations.calcite.objects.PrestoTableScan;
 import org.apache.calcite.rel.RelNode;
@@ -45,6 +46,11 @@ public class PrestoRelVisitor<C, R>
     }
 
     public R visitProject(PrestoProject node, C context)
+    {
+        return visitPlan(node, context);
+    }
+
+    public R visitLimit(PrestoLimitNode node, C context)
     {
         return visitPlan(node, context);
     }

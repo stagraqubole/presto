@@ -22,6 +22,7 @@ import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.optimizations.PlanOptimizer;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.JoinNode;
+import com.facebook.presto.sql.planner.plan.LimitNode;
 import com.facebook.presto.sql.planner.plan.OutputNode;
 import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
@@ -110,6 +111,13 @@ public class CalciteOptimizer
 
         @Override
         public PlanNode visitFilter(FilterNode node, RewriteContext<CalciteValidatorContext> context)
+        {
+            context.rewrite(node.getSource(), context.get());
+            return node;
+        }
+
+        @Override
+        public PlanNode visitLimit(LimitNode node, RewriteContext<CalciteValidatorContext> context)
         {
             context.rewrite(node.getSource(), context.get());
             return node;
