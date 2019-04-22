@@ -1,0 +1,3 @@
+hdfs:
+  webhdfs:
+    uri: http://${databases.hive.host}:9870 # hadoop3 has UI on 9870

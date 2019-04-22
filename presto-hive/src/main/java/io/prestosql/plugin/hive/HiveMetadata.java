@@ -1729,6 +1729,9 @@ public class HiveMetadata
 
         HivePartitionResult partitionResult = partitionManager.getPartitions(metastore, handle, constraint);
         HiveTableHandle newHandle = partitionManager.applyPartitionResult(handle, partitionResult);
+        if (newHandle.getPartitions().isPresent()) {
+            metastore.partitionsToBeRead(handle, newHandle.getPartitions().get());
+        }
 
         if (handle.getPartitions().equals(newHandle.getPartitions()) &&
                 handle.getCompactEffectivePredicate().equals(newHandle.getCompactEffectivePredicate()) &&
@@ -2209,6 +2212,18 @@ public class HiveMetadata
     public void commit()
     {
         metastore.commit();
+    }
+
+    @Override
+    public void beginQuery(ConnectorSession session)
+    {
+        metastore.beginQuery(session);
+    }
+
+    @Override
+    public void cleanupQuery(ConnectorSession session)
+    {
+        metastore.cleanupQuery(session);
     }
 
     public static Optional<SchemaTableName> getSourceTableNameFromSystemTable(SchemaTableName tableName)

@@ -788,7 +788,13 @@ public class QueryStateMachine
 
     private void transitionToFinished()
     {
-        cleanupQueryQuietly();
+        try {
+            metadata.cleanupQuery(session);
+        }
+        catch (Exception e) {
+            transitionToFailed(e);
+        }
+
         queryStateTimer.endQuery();
 
         queryState.setIf(FINISHED, currentState -> !currentState.isDone());

@@ -327,7 +327,8 @@ public class TestBackgroundHiveSplitLoader
                 new CachingDirectoryLister(new HiveConfig()),
                 EXECUTOR,
                 2,
-                false);
+                false,
+                "");
     }
 
     private static BackgroundHiveSplitLoader backgroundHiveSplitLoader(List<LocatedFileStatus> files, DirectoryLister directoryLister)
@@ -352,7 +353,8 @@ public class TestBackgroundHiveSplitLoader
                 directoryLister,
                 EXECUTOR,
                 2,
-                false);
+                false,
+                "");
     }
 
     private static BackgroundHiveSplitLoader backgroundHiveSplitLoaderOfflinePartitions()
@@ -371,7 +373,8 @@ public class TestBackgroundHiveSplitLoader
                 new CachingDirectoryLister(new HiveConfig()),
                 directExecutor(),
                 2,
-                false);
+                false,
+                "");
     }
 
     private static Iterable<HivePartitionMetadata> createPartitionMetadataWithOfflinePartitions()

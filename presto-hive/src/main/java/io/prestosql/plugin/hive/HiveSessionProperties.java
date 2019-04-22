@@ -15,6 +15,7 @@ package io.prestosql.plugin.hive;
 
 import com.google.common.collect.ImmutableList;
 import io.airlift.units.DataSize;
+import io.airlift.units.Duration;
 import io.prestosql.orc.OrcWriteValidation.OrcWriteValidationMode;
 import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.connector.ConnectorSession;
@@ -78,6 +79,7 @@ public final class HiveSessionProperties
     private static final String S3_SELECT_PUSHDOWN_ENABLED = "s3_select_pushdown_enabled";
     private static final String TEMPORARY_STAGING_DIRECTORY_ENABLED = "temporary_staging_directory_enabled";
     private static final String TEMPORARY_STAGING_DIRECTORY_PATH = "temporary_staging_directory_path";
+    private static final String HIVE_TXN_HEARTBEAT_INTERVAL = "hive_txn_heartbeat_interval";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -308,7 +310,16 @@ public final class HiveSessionProperties
                         TEMPORARY_STAGING_DIRECTORY_PATH,
                         "Temporary staging directory location",
                         hiveConfig.getTemporaryStagingDirectoryPath(),
-                        false));
+                        false),
+                new PropertyMetadata<>(
+                        HIVE_TXN_HEARTBEAT_INTERVAL,
+                        "Interval after which heartbeat is sent for open Hive transaction",
+                        VARCHAR,
+                        Duration.class,
+                        hiveConfig.getHiveTxnHeartBeatInterval(),
+                        false,
+                        value -> Duration.valueOf((String) value),
+                        Duration::toString));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -515,5 +526,10 @@ public final class HiveSessionProperties
     public static String getTemporaryStagingDirectoryPath(ConnectorSession session)
     {
         return session.getProperty(TEMPORARY_STAGING_DIRECTORY_PATH, String.class);
+    }
+
+    public static Duration getHiveTxnHeartBeatInterval(ConnectorSession session)
+    {
+        return session.getProperty(HIVE_TXN_HEARTBEAT_INTERVAL, Duration.class);
     }
 }

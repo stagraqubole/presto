@@ -136,6 +136,31 @@
             <groupId>io.prestosql.cassandra</groupId>
             <artifactId>cassandra-driver</artifactId>
         </dependency>
+        <!-- For Hive acid tests -->
+        <dependency>
+            <groupId>io.prestosql</groupId>
+            <artifactId>presto-hive</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.httpcomponents</groupId>
+                    <artifactId>httpcore</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.httpcomponents</groupId>
+                    <artifactId>httpclient</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.thrift</groupId>
+            <artifactId>libthrift</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.prestosql.hive</groupId>
+            <artifactId>hive-apache</artifactId>
+            <version>3.0.0-2</version>
+        </dependency>
     </dependencies>
 
     <build>

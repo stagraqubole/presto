@@ -165,6 +165,8 @@ public class HiveConfig
     private long fileStatusCacheMaxSize = 1000 * 1000;
     private List<String> fileStatusCacheTables = ImmutableList.of();
 
+    private Duration hiveTxnHeartBeatInterval = new Duration(5, TimeUnit.SECONDS);
+
     public int getMaxInitialSplits()
     {
         return maxInitialSplits;
@@ -1321,5 +1323,18 @@ public class HiveConfig
     public String getTemporaryStagingDirectoryPath()
     {
         return temporaryStagingDirectoryPath;
+    }
+
+    @Config("hive.txn-heartbeat-interval")
+    @ConfigDescription("Interval after which heartbeat is sent for open Hive transaction")
+    public HiveConfig setHiveTxnHeartBeatInterval(Duration interval)
+    {
+        this.hiveTxnHeartBeatInterval = interval;
+        return this;
+    }
+
+    public Duration getHiveTxnHeartBeatInterval()
+    {
+        return hiveTxnHeartBeatInterval;
     }
 }
