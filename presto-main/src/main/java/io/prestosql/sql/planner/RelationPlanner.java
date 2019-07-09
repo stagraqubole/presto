@@ -48,6 +48,7 @@ import io.prestosql.sql.planner.plan.UnionNode;
 import io.prestosql.sql.planner.plan.UnnestNode;
 import io.prestosql.sql.planner.plan.ValuesNode;
 import io.prestosql.sql.tree.AliasedRelation;
+import io.prestosql.sql.tree.BooleanLiteral;
 import io.prestosql.sql.tree.Cast;
 import io.prestosql.sql.tree.CoalesceExpression;
 import io.prestosql.sql.tree.ComparisonExpression;
@@ -156,15 +157,23 @@ class RelationPlanner
 
         ImmutableList.Builder<Symbol> outputSymbolsBuilder = ImmutableList.builder();
         ImmutableMap.Builder<Symbol, ColumnHandle> columns = ImmutableMap.builder();
+        Optional<Symbol> isValidColumn = Optional.empty();
         for (Field field : scope.getRelationType().getAllFields()) {
             Symbol symbol = symbolAllocator.newSymbol(field.getName().get(), field.getType());
 
             outputSymbolsBuilder.add(symbol);
             columns.put(symbol, analysis.getColumn(field));
+            if (field.getName().get().equalsIgnoreCase("$isvalid")) {
+                isValidColumn = Optional.of(symbol);
+            }
         }
 
         List<Symbol> outputSymbols = outputSymbolsBuilder.build();
         PlanNode root = TableScanNode.newInstance(idAllocator.getNextId(), handle, outputSymbols, columns.build());
+        if (isValidColumn.isPresent()) {
+            root = addFilterNodeForACIDTable((TableScanNode) root, outputSymbols.get(outputSymbols.size() - 1));
+            outputSymbols = root.getOutputSymbols();
+        }
         return new RelationPlan(root, scope, outputSymbols);
     }
 
@@ -900,6 +909,15 @@ class RelationPlanner
                 AggregationNode.Step.SINGLE,
                 Optional.empty(),
                 Optional.empty());
+    }
+
+    private PlanNode addFilterNodeForACIDTable(TableScanNode node, Symbol isValidSymbol)
+    {
+        ComparisonExpression filterExpression = new ComparisonExpression(ComparisonExpression.Operator.EQUAL, isValidSymbol.toSymbolReference(), new BooleanLiteral("true"));
+        return new FilterNode(
+                idAllocator.getNextId(),
+                node,
+                filterExpression);
     }
 
     private static class SetOperationPlan
