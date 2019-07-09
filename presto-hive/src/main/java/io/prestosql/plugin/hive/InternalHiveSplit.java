@@ -58,6 +58,7 @@ public class InternalHiveSplit
     private final Map<Integer, HiveTypeName> columnCoercions;
     private final Optional<BucketConversion> bucketConversion;
     private final boolean s3SelectPushdownEnabled;
+    private final Optional<DeleteDeltaLocations> deleteDetlaLocations;
 
     private long start;
     private int currentBlockIndex;
@@ -76,7 +77,8 @@ public class InternalHiveSplit
             boolean forceLocalScheduling,
             Map<Integer, HiveTypeName> columnCoercions,
             Optional<BucketConversion> bucketConversion,
-            boolean s3SelectPushdownEnabled)
+            boolean s3SelectPushdownEnabled,
+            Optional<DeleteDeltaLocations> deleteDetlaLocations)
     {
         checkArgument(start >= 0, "start must be positive");
         checkArgument(end >= 0, "length must be positive");
@@ -89,6 +91,7 @@ public class InternalHiveSplit
         requireNonNull(bucketNumber, "bucketNumber is null");
         requireNonNull(columnCoercions, "columnCoercions is null");
         requireNonNull(bucketConversion, "bucketConversion is null");
+        requireNonNull(deleteDetlaLocations, "deleteDeltaLocations is null");
 
         this.partitionName = partitionName;
         this.path = path;
@@ -104,6 +107,7 @@ public class InternalHiveSplit
         this.columnCoercions = ImmutableMap.copyOf(columnCoercions);
         this.bucketConversion = bucketConversion;
         this.s3SelectPushdownEnabled = s3SelectPushdownEnabled;
+        this.deleteDetlaLocations = deleteDetlaLocations;
     }
 
     public String getPath()
@@ -212,6 +216,11 @@ public class InternalHiveSplit
             result += INTEGER_INSTANCE_SIZE + hiveTypeName.getEstimatedSizeInBytes();
         }
         return result;
+    }
+
+    public Optional<DeleteDeltaLocations> getDeleteDetlaLocations()
+    {
+        return deleteDetlaLocations;
     }
 
     @Override

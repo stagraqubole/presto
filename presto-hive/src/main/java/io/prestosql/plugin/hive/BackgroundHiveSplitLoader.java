@@ -391,15 +391,9 @@ public class BackgroundHiveSplitLoader
         // therefore we must not split files when it is enabled.
         boolean splittable = getHeaderCount(schema) == 0 && getFooterCount(schema) == 0 && !s3SelectPushdownEnabled;
         if (!AcidUtils.isTransactionalTable(table.getParameters())) {
-            fileIterators.addLast(createInternalHiveSplitIterator(path, fs, splitFactory, splittable));
+            fileIterators.addLast(createInternalHiveSplitIterator(path, fs, splitFactory, splittable, Optional.empty()));
         }
         else {
-            if (AcidUtils.isFullAcidTable(table.getParameters())) {
-                throw new PrestoException(NOT_SUPPORTED, format("Reading from Full ACID tables are not supported: %s.%s", table.getDatabaseName(), table.getTableName()));
-            }
-
-            // Now we should only have insert only table
-            checkState(AcidUtils.isInsertOnlyTable(table.getParameters()), String.format("Unknown transactional table type [%s] : neither Insert Only nor Full ACID", table.getTableName()));
             AcidUtils.Directory directory = AcidUtils.getAcidState(
                     path,
                     configuration,
@@ -409,13 +403,24 @@ public class BackgroundHiveSplitLoader
                     false,
                     true);
             // delta directories
+
+            // First create Delete Deltas registry
+            DeleteDeltaLocations deleteDeltaLocations = new DeleteDeltaLocations();
             for (AcidUtils.ParsedDelta delta : directory.getCurrentDirectories()) {
-                fileIterators.addLast(createInternalHiveSplitIterator(delta.getPath(), fs, splitFactory, splittable));
+                if (delta.isDeleteDelta()) {
+                    deleteDeltaLocations.addDeleteDelta(delta.getPath(), delta.getMinWriteId(), delta.getMaxWriteId(), delta.getStatementId());
+                }
+            }
+
+            for (AcidUtils.ParsedDelta delta : directory.getCurrentDirectories()) {
+                if (!delta.isDeleteDelta()) {
+                    fileIterators.addLast(createInternalHiveSplitIterator(delta.getPath(), fs, splitFactory, splittable, Optional.of(deleteDeltaLocations)));
+                }
             }
 
             // base
             if (directory.getBaseDirectory() != null) {
-                fileIterators.addLast(createInternalHiveSplitIterator(directory.getBaseDirectory(), fs, splitFactory, splittable));
+                fileIterators.addLast(createInternalHiveSplitIterator(directory.getBaseDirectory(), fs, splitFactory, splittable, Optional.of(deleteDeltaLocations)));
             }
         }
         return COMPLETED_FUTURE;
@@ -445,10 +450,10 @@ public class BackgroundHiveSplitLoader
                 .anyMatch(name -> name.equals("UseFileSplitsFromInputFormat"));
     }
 
-    private Iterator<InternalHiveSplit> createInternalHiveSplitIterator(Path path, FileSystem fileSystem, InternalHiveSplitFactory splitFactory, boolean splittable)
+    private Iterator<InternalHiveSplit> createInternalHiveSplitIterator(Path path, FileSystem fileSystem, InternalHiveSplitFactory splitFactory, boolean splittable, Optional<DeleteDeltaLocations> deleteDetlaLocations)
     {
         return Streams.stream(new HiveFileIterator(table, path, fileSystem, directoryLister, namenodeStats, recursiveDirWalkerEnabled ? RECURSE : IGNORED))
-                .map(status -> splitFactory.createInternalHiveSplit(status, splittable))
+                .map(status -> splitFactory.createInternalHiveSplit(status, splittable, deleteDetlaLocations))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .iterator();

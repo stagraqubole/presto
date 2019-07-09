@@ -306,7 +306,8 @@ public class TestHiveSplitSource
                     false,
                     ImmutableMap.of(),
                     Optional.empty(),
-                    false);
+                    false,
+                    Optional.empty());
         }
 
         private static Properties properties(String key, String value)
