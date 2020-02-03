@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static io.prestosql.execution.scheduler.NodeScheduler.calculateLowWatermark;
 import static io.prestosql.execution.scheduler.NodeScheduler.randomizedNodes;
@@ -208,7 +209,7 @@ public class UniformNodeSelector
         }
 
         if (splitsToBeRedistributed) {
-            equateDistribution(assignment, assignmentStats, nodeMap);
+            equateDistribution(assignment, assignmentStats, nodeMap, includeCoordinator);
         }
         return new SplitPlacementResult(blocked, assignment);
     }
@@ -227,13 +228,16 @@ public class UniformNodeSelector
      * @param assignmentStats required to obtain info regarding splits assigned to a node outside the current batch of assignment
      * @param nodeMap to get a list of all nodes to which splits can be assigned
      */
-    private void equateDistribution(Multimap<InternalNode, Split> assignment, NodeAssignmentStats assignmentStats, NodeMap nodeMap)
+    private void equateDistribution(Multimap<InternalNode, Split> assignment, NodeAssignmentStats assignmentStats, NodeMap nodeMap, boolean includeCoordinator)
     {
         if (assignment.isEmpty()) {
             return;
         }
 
-        Collection<InternalNode> allNodes = nodeMap.getNodesByHostAndPort().values();
+        Collection<InternalNode> allNodes = nodeMap.getNodesByHost().values().stream()
+                .filter(node -> includeCoordinator || !nodeMap.getCoordinatorNodeIds().contains(node.getNodeIdentifier()))
+                .collect(Collectors.toList());
+
         if (allNodes.size() < 2) {
             return;
         }
